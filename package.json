@@ -1,0 +1,44 @@
+{
+  "name": "dropbeam",
+  "version": "1.0.0",
+  "description": "AirDrop for any device, in your browser. No upload, no account, no server.",
+  "private": false,
+  "license": "MIT",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build && node scripts/postbuild.mjs",
+    "preview": "vite preview",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint .",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "test": "vitest run",
+    "test:unit": "vitest run tests/unit",
+    "test:integration": "vitest run tests/integration",
+    "test:watch": "vitest",
+    "test:e2e": "playwright test",
+    "size": "node scripts/size-budget.mjs",
+    "ci": "npm run typecheck && npm run lint && npm run test && npm run build && npm run size"
+  },
+  "dependencies": {
+    "fflate": "0.8.3",
+    "hash-wasm": "4.12.0",
+    "jsqr": "1.4.0",
+    "preact": "11.0.0",
+    "uqr": "0.1.3"
+  },
+  "devDependencies": {
+    "@eslint/js": "10.0.1",
+    "@testing-library/preact": "3.2.4",
+    "@types/node": "26.6.4",
+    "eslint": "10.12.0",
+    "globals": "17.13.0",
+    "jsdom": "30.1.1",
+    "prettier": "3.9.9",
+    "typescript": "6.0.3",
+    "typescript-eslint": "8.71.0",
+    "vite": "8.3.2",
+    "vitest": "5.0.3"
+  }
+}

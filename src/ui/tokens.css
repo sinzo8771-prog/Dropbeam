@@ -1,0 +1,104 @@
+/* Dropbeam design tokens (PRD Appendix D).
+   Components may only use these variables for color, type, space, radius and motion.
+   Adding a new color requires a docs/DECISIONS.md entry and a contrast check. */
+
+:root {
+  color-scheme: light dark;
+
+  /* color: light */
+  --paper: #f6f2ea;
+  --panel: #ffffff;
+  --ink: #1b1a17;
+  --ink-muted: #5c574e;
+  --hairline: #ddd6c8; /* decorative dividers only */
+  --border-strong: #857d6f; /* inputs, buttons, drop zone: 3:1 vs surfaces */
+  --accent: #c8381a;
+  --on-accent: #ffffff;
+  --success: #2a7048;
+  --warning: #8a5a00;
+  --danger: #b3261e;
+
+  /* type */
+  --font-display: "Fraunces", Georgia, serif;
+  --font-ui: "Instrument Sans", system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, monospace;
+  --fs-xs: 0.8125rem;
+  --fs-sm: 0.9375rem;
+  --fs-md: 1rem;
+  --fs-lg: 1.25rem;
+  --fs-xl: 1.625rem;
+  --fs-2xl: 2.25rem;
+
+  /* space (4px base) */
+  --s-1: 4px;
+  --s-2: 8px;
+  --s-3: 12px;
+  --s-4: 16px;
+  --s-6: 24px;
+  --s-8: 32px;
+  --s-12: 48px;
+
+  /* shape */
+  --r-sm: 4px;
+  --r-md: 8px;
+  --r-lg: 14px;
+  --shadow-1: 0 1px 0 rgba(27, 26, 23, 0.06);
+
+  /* motion */
+  --t-fast: 120ms;
+  --t-base: 180ms;
+  --t-slow: 220ms;
+  --ease: cubic-bezier(0.2, 0.7, 0.2, 1);
+
+  /* focus */
+  --focus: 2px solid var(--accent);
+  --focus-offset: 2px;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --paper: #151412;
+    --panel: #1e1c19;
+    --ink: #efeae0;
+    --ink-muted: #a8a196;
+    --hairline: #34312b;
+    --border-strong: #7a7468;
+    --accent: #f0603f;
+    --on-accent: #1b1a17;
+    --success: #6cc38f;
+    --warning: #e3a94b;
+    --danger: #ff8a80;
+    --shadow-1: none;
+  }
+}
+:root[data-theme="dark"] {
+  --paper: #151412;
+  --panel: #1e1c19;
+  --ink: #efeae0;
+  --ink-muted: #a8a196;
+  --hairline: #34312b;
+  --border-strong: #7a7468;
+  --accent: #f0603f;
+  --on-accent: #1b1a17;
+  --success: #6cc38f;
+  --warning: #e3a94b;
+  --danger: #ff8a80;
+  --shadow-1: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --t-fast: 0ms;
+    --t-base: 0ms;
+    --t-slow: 0ms;
+  }
+}
+
+/* QR tile is always black on white, in both themes */
+.qr-tile {
+  background: #fff;
+  color: #000;
+  padding: 16px;
+  border-radius: var(--r-md);
+  border: 1px solid var(--hairline);
+}
