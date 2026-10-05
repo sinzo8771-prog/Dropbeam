@@ -39,6 +39,11 @@ export default tseslint.config(
     },
   },
   {
+    files: ["public/**/*.js"],
+    // Service worker global surface (self, caches, clients, …).
+    languageOptions: { globals: { ...globals.serviceworker } },
+  },
+  {
     files: ["src/core/**/*.ts"],
     rules: {
       "no-restricted-globals": "error",

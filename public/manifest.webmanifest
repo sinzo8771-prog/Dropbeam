@@ -1,0 +1,35 @@
+{
+  "name": "Dropbeam",
+  "short_name": "Dropbeam",
+  "description": "Send files straight between your devices. Nothing is uploaded.",
+  "id": "./",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait-primary",
+  "background_color": "#F6F2EA",
+  "theme_color": [
+    { "media": "(prefers-color-scheme: light)", "color": "#F6F2EA" },
+    { "media": "(prefers-color-scheme: dark)", "color": "#151412" }
+  ],
+  "icons": [
+    {
+      "src": "./icons/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "./icons/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "./icons/icon-maskable-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ]
+}

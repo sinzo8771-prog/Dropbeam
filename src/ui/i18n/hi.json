@@ -24,6 +24,9 @@
   "action.accept": "स्वीकार करें",
   "action.save": "सहेजें",
 
+  "update.available": "नया संस्करण उपलब्ध है।",
+  "update.reload": "फिर लोड करें",
+
   "pair.title": "जोड़ी बनाएँ",
   "pair.scanOffer": "दूसरे उपकरण का QR कोड स्कैन करें",
   "pair.scanReply": "उत्तर स्कैन करें",

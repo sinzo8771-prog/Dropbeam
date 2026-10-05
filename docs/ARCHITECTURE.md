@@ -9,7 +9,7 @@ then transfer bytes over a single reliable, ordered `RTCDataChannel`.
 ```
 src/ui        Preact screens/components. Imports core. Never the reverse.
 src/core      Pure logic. No DOM except the modules listed under platform/.
-src/pwa       Service worker, manifest, icons.
+public/        Static PWA assets: service worker, manifest, icons.
 ```
 
 ### core/handshake

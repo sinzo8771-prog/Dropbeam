@@ -325,3 +325,45 @@ library's docs gets an entry here (PRD section 0.3).
 - **Reason:** A state in the PRD state machine must always have a screen. The
   empty `<main>` was only visible as a flash, which is exactly the kind of defect
   a screenshot review misses and a DOM assertion catches.
+
+---
+
+## 2026-10-05 · PWA assets: hand-rolled PNGs and a stamped worker (M7, FR-50)
+
+- **Problem:** FR-50 needs an installable PWA: manifest, icons (192, 512,
+  maskable), and a service worker giving an offline shell plus a "New version,
+  reload" flow. No image toolchain is permitted in this dependency-light
+  (NFR-1) project, and Vite cannot version a static `sw.js` so its cache name
+  must be stamped at build time.
+- **Choice:** Generate the icons with a tiny self-contained Node script
+  (`scripts/generate-icons.mjs`) that writes PNGs by hand from zlib — no sharp/
+  ImageMagick/SVG dependency. Ship the worker as plain JS in `public/` (Vite
+  copies it verbatim to `dist/`) and let `scripts/postbuild.mjs` overwrite a
+  `__BUILD_ID__` placeholder so each build rolls the cache name `dropbeam-<id>`.
+  The worker is cache-first for static assets, network-first+offline-fallback for
+  navigations, and announces a takeover to clients that were controlled by the
+  *previous* build only (first-install tabs receive no reload prompt).
+- **Reason:** A 4 KB PNG encoder costs nothing and keeps the dep tree unchanged;
+  a plain JS worker at a stable URL is required by the spec (module workers are
+  not yet widely supported as the SW entry); the versioned cache + `caches.delete`
+  on activate is the smallest correct pattern; gating the reload prompt on clients
+  controlled before `claim()` avoids showing "New version available" on a first
+  visit. The `pwa.test.ts` unit test asserts the manifest/icon wiring and the
+  staged stamp before any browser runs.
+
+---
+
+## 2026-10-05 · Update flow lives in the app shell, not the connection screen (M7)
+
+- **Problem:** The PRD safe-update flow ("New version, reload") must be visible
+  on every screen, but the connection state machine has no concept of it and
+  threading a new state through `App`'s screen logic would conflate build lifecycle
+  with connection lifecycle.
+- **Choice:** The worker posts `{type: "dropbeam.updated"}` to previously-controlled
+  clients; `main.tsx` re-broadcasts it as a `"dropbeam:update"` window event; `App`
+  listens and renders a fixed bottom bar (`update.available` / `update.reload`,
+  en+hi) that calls `location.reload()`.
+- **Reason:** Keeps FR-50 lifecycle out of the connection state machine (rule 2 of
+  the data-flow rules) and makes the banner reachable from any screen without
+  touching the machine. Reloading is the correct action because `skipWaiting()` on
+  install means the fresh SW is already in control.

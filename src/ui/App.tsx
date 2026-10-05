@@ -68,6 +68,14 @@ export function App({ settings, baseUrl }: AppProps = {}) {
   const [channel, setChannel] = useState<ChannelLike | null>(null);
   const [approvalOpen, setApprovalOpen] = useState(false);
   const [approved, setApproved] = useState(false);
+  /** FR-50: set when the service worker takes over a newer build. */
+  const [updateReady, setUpdateReady] = useState(false);
+
+  useEffect(() => {
+    const onUpdate = () => setUpdateReady(true);
+    window.addEventListener("dropbeam:update", onUpdate);
+    return () => window.removeEventListener("dropbeam:update", onUpdate);
+  }, []);
   const assembler = useRef(new FrameAssembler());
   const videoRef = useRef<HTMLVideoElement>(null);
   const peerSessionRef = useRef<PeerSession | null>(null);
@@ -579,6 +587,21 @@ export function App({ settings, baseUrl }: AppProps = {}) {
           fail("PEER_DECLINED");
         }}
       />
+
+      {/* FR-50 safe update flow: the new build is already in
+          control, so reloading is the only step left. */}
+      {updateReady ? (
+        <div class="update-bar" role="status">
+          <p>{t("update.available")}</p>
+          <button
+            type="button"
+            class="btn btn-primary"
+            onClick={() => window.location.reload()}
+          >
+            {t("update.reload")}
+          </button>
+        </div>
+      ) : null}
     </div>
   );
 }

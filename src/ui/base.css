@@ -752,6 +752,28 @@ dialog.sheet {
   white-space: pre-wrap;
 }
 
+/* FR-50: the "New version, reload" prompt, pinned above the
+   bottom edge so it never covers the transfer controls. */
+.update-bar {
+  position: fixed;
+  left: 50%;
+  bottom: calc(env(safe-area-inset-bottom, 0px) + 12px);
+  transform: translateX(-50%);
+  z-index: 30;
+  display: flex;
+  align-items: center;
+  gap: var(--s-3);
+  padding: var(--s-3) var(--s-4);
+  background: var(--panel);
+  border: 1px solid var(--hairline);
+  border-radius: var(--r-md);
+  box-shadow: var(--shadow-1);
+}
+
+.update-bar p {
+  margin: 0;
+}
+
 .alert {
   display: flex;
   flex-direction: column;

@@ -24,6 +24,9 @@
   "action.accept": "Accept",
   "action.save": "Save",
 
+  "update.available": "New version available.",
+  "update.reload": "Reload",
+
   "pair.title": "Pairing",
   "pair.scanOffer": "Scan the other device's QR code",
   "pair.scanReply": "Scan reply",
