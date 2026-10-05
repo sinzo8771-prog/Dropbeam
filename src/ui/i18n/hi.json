@@ -27,6 +27,17 @@
   "update.available": "नया संस्करण उपलब्ध है।",
   "update.reload": "फिर लोड करें",
 
+  "debug.title": "डीबग पैनल",
+  "debug.hint": "डेवलपर गेस्चर से खोला गया: स्क्रीन के दाएँ किनारे पर आठ बार थपकना।",
+  "debug.buildId": "बिल्ड id",
+  "debug.sw": "सेविस वर्कर",
+  "debug.cache": "कैश",
+  "debug.state": "कनेक्शन स्थिति",
+  "debug.protocol": "प्रोटोकॉल",
+  "debug.channel": "चैनल",
+  "debug.files": "चल रही फ़ाइलें",
+  "debug.verified": "सत्यापित",
+
   "pair.title": "जोड़ी बनाएँ",
   "pair.scanOffer": "दूसरे उपकरण का QR कोड स्कैन करें",
   "pair.scanReply": "उत्तर स्कैन करें",

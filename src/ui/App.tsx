@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "preact/hooks";
 import { Beam } from "./components/Beam";
+import { DebugGesture, DebugPanel, type DebugSessionMetrics } from "./debug";
 import { CodeBox } from "./components/CodeBox";
 import { Prompt } from "./components/Prompt";
 import { QrTile } from "./components/QrTile";
@@ -18,6 +19,7 @@ import type { VerificationPhrase } from "../core/peer/verify-phrase";
 import { ConnectionStateMachine, type ConnectionState } from "../core/peer/state-machine";
 import { useTransfer } from "./use-transfer";
 import type { ChannelLike } from "../core/transfer/channel";
+import { isTerminalPhase } from "../core/transfer/phase";
 import type { ErrorCode } from "../core/errors";
 
 /**
@@ -70,6 +72,7 @@ export function App({ settings, baseUrl }: AppProps = {}) {
   const [approved, setApproved] = useState(false);
   /** FR-50: set when the service worker takes over a newer build. */
   const [updateReady, setUpdateReady] = useState(false);
+  const [debugOpen, setDebugOpen] = useState(false);
 
   useEffect(() => {
     const onUpdate = () => setUpdateReady(true);
@@ -135,6 +138,20 @@ export function App({ settings, baseUrl }: AppProps = {}) {
     fidParity: side === "host" ? 1 : 0,
   });
 
+  // FR-50 debug panel: session metrics the shell already knows,
+  // recomputed when any source changes. The PWA-side health
+  // (build id, service worker, cache) is gathered by the panel
+  // itself — see src/ui/debug.tsx.
+  const debugMetrics = useMemo<DebugSessionMetrics>(
+    () => ({
+      state: screen,
+      protocol: peerSessionRef.current?.protocolVersion ?? null,
+      channel: channel ? channel.readyState : "none",
+      filesInFlight: transfer.files.filter((file) => !isTerminalPhase(file.phase)).length,
+      verified: phrase !== null,
+    }),
+    [screen, channel, transfer.files, phrase],
+  );
   // PRD 9.3: the man-in-the-middle check. Derived from the two DTLS
   // fingerprints once the channel is open, so it is available on both sides.
   useEffect(() => {
@@ -541,6 +558,8 @@ export function App({ settings, baseUrl }: AppProps = {}) {
         ) : null}
       </main>
 
+      {/* The host can answer a reply code without leaving the
+          pairing screen: scan it or paste it (PRD 5.1). */}
       <Prompt
         open={scanOpen}
         title={t("pair.scanReply")}
@@ -593,15 +612,20 @@ export function App({ settings, baseUrl }: AppProps = {}) {
       {updateReady ? (
         <div class="update-bar" role="status">
           <p>{t("update.available")}</p>
-          <button
-            type="button"
-            class="btn btn-primary"
-            onClick={() => window.location.reload()}
-          >
+          <button type="button" class="btn btn-primary" onClick={() => window.location.reload()}>
             {t("update.reload")}
           </button>
         </div>
       ) : null}
+
+      {/* FR-50 debug panel: build id, service worker + cache health,
+          and live connection metrics. Hidden by default, behind a
+          deliberate gesture so it is never mistaken for an affordance. */}
+      {debugOpen ? (
+        <DebugPanel session={debugMetrics} t={t} onClose={() => setDebugOpen(false)} />
+      ) : null}
+
+      <DebugGesture onOpen={() => setDebugOpen((v) => !v)} />
     </div>
   );
 }

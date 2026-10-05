@@ -27,6 +27,17 @@
   "update.available": "New version available.",
   "update.reload": "Reload",
 
+  "debug.title": "Debug panel",
+  "debug.hint": "Opened with the developer gesture: eight taps on the right edge of the screen.",
+  "debug.buildId": "Build id",
+  "debug.sw": "Service worker",
+  "debug.cache": "Cache",
+  "debug.state": "Connection state",
+  "debug.protocol": "Protocol",
+  "debug.channel": "Channel",
+  "debug.files": "Files in flight",
+  "debug.verified": "Verified",
+
   "pair.title": "Pairing",
   "pair.scanOffer": "Scan the other device's QR code",
   "pair.scanReply": "Scan reply",

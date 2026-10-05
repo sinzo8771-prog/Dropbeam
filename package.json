@@ -19,7 +19,8 @@
     "test:watch": "vitest",
     "test:e2e": "playwright test",
     "size": "node scripts/size-budget.mjs",
-    "ci": "npm run typecheck && npm run lint && npm run test && npm run build && npm run size"
+    "pwa:health": "node scripts/pwa-health.mjs",
+    "ci": "npm run typecheck && npm run lint && npm run test && npm run build && npm run size && npm run pwa:health"
   },
   "dependencies": {
     "fflate": "0.8.3",

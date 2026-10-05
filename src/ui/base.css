@@ -774,6 +774,82 @@ dialog.sheet {
   margin: 0;
 }
 
+/* FR-50 developer debug panel. Revealed only by the hidden
+   gesture (8 taps on the right edge), so it is never mistaken
+   for an affordance. Data is mono per PRD; every color and
+   size comes from the existing token set. */
+.debug-panel {
+  position: fixed;
+  left: var(--s-4);
+  right: var(--s-4);
+  bottom: calc(var(--s-4) + env(safe-area-inset-bottom, 0px));
+  max-height: 50vh;
+  overflow-y: auto;
+  z-index: 40;
+  background: var(--panel);
+  border: 1px solid var(--hairline);
+  border-radius: var(--r-md);
+  box-shadow: var(--shadow-1);
+  color: var(--ink);
+  padding: var(--s-4);
+  font: var(--fs-sm) / 1.5 var(--font-mono);
+}
+
+.debug-panel-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: var(--s-4);
+  margin-bottom: var(--s-2);
+}
+
+.debug-panel-title {
+  font: var(--fs-sm) / 1.5 var(--font-ui);
+  font-weight: 600;
+  color: var(--ink-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.debug-panel-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: var(--s-4);
+  padding: var(--s-2) 0;
+  border-top: 1px solid var(--hairline);
+}
+
+.debug-panel-row .label {
+  color: var(--ink-muted);
+  white-space: nowrap;
+}
+
+.debug-panel-row .value {
+  font-weight: 500;
+  text-align: right;
+  word-break: break-all;
+}
+
+/* Health rows reuse the semantic status tokens, which already
+   carry AA contrast on both surfaces. */
+.debug-panel-row[data-health="good"] .value {
+  color: var(--success);
+}
+
+.debug-panel-row[data-health="warn"] .value {
+  color: var(--warning);
+}
+
+.debug-panel-note {
+  margin: var(--s-3) 0 0;
+  padding: var(--s-3);
+  background: var(--paper);
+  border-top: 1px solid var(--hairline);
+  font: var(--fs-xs) / 1.5 var(--font-ui);
+  color: var(--ink-muted);
+}
+
 .alert {
   display: flex;
   flex-direction: column;

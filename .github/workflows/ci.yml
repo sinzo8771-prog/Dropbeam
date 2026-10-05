@@ -20,3 +20,8 @@ jobs:
       - run: npm test
       - run: npm run build
       - run: npm run size
+      # Installs the Chromium binary for the e2e specs in tests/e2e;
+      # --with-deps also pulls the system libraries Chromium needs on
+      # the GitHub-hosted runner.
+      - run: npx playwright install --with-deps chromium
+      - run: npm run test:e2e
