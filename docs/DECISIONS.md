@@ -109,6 +109,37 @@ library's docs gets an entry here (PRD section 0.3).
   fallback; tolerant assembly matches how animated QRs actually scan (dropped
   and repeated frames are the norm, not the exception).
 
+## 2026-10-05 · UI: state-driven screens, CSP without frame-ancestors (M4)
+
+- **Problem:** The screens of PRD 10.1 have to stay in step with the connection
+  state machine, and the shipped CSP was producing a console error in every
+  browser.
+- **Choice:** `App` renders the screen that `ConnectionStateMachine` reports and
+  never mutates connection state; the machine is rebuilt when the side flips
+  (Start → host, Join → guest) because `SHOWING` resolves per side. Two defects
+  this surfaced: a guest could never leave `GATHERING` because the transition
+  was hardcoded to `SHOWING_OFFER`, and "Try again" reset the machine but left
+  the reason code on screen — both fixed at the cause, not in the UI. The CSP
+  now omits `frame-ancestors`.
+- **Reason:** Browsers _ignore_ `frame-ancestors` when the policy arrives in a
+  `<meta>` tag and log an error for it, so it bought no clickjacking protection
+  while polluting the console. The deploy target (GitHub Pages / Cloudflare
+  Pages) must send it as a real HTTP header; that is noted in the deploy docs.
+  Keeping the console clean is a release-quality signal, not cosmetics.
+
+## 2026-10-05 · Progress bars animate with transform, not width (M4)
+
+- **Problem:** The obvious `transition: width` on a transfer progress bar is
+  flagged by Impeccable's `layout-transition` rule and genuinely forces layout
+  on every progress tick — dozens per second for a fast transfer.
+- **Choice:** The fill is a full-width element scaled with
+  `transform: scaleX(ratio)` (compositor-only), with `aria-valuenow` carrying the
+  same value for assistive tech and a unit test asserting the fill never sets
+  `width`.
+- **Reason:** Progress ticks are the hottest UI path in the app; keeping them
+  off the layout path preserves the 60fps budget while remaining accessible, and
+  it satisfies the detector rule that DoD 11 requires to report zero findings.
+
 ## 2026-10-05 · Pairing links are fragment-carried, never percent-encoded (M3)
 
 - **Problem:** The offer/answer link (`#j=`, `#a=`) is typed, copied through

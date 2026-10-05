@@ -49,6 +49,21 @@ these DOM APIs from core.
 
 - `scanner.ts` — camera QR scanning: native `BarcodeDetector` when available,
   else a polling canvas loop with lazily-imported jsQR.
+- `i18n.ts` — en/hi catalogs, `{placeholder}` interpolation, PRD 12 error text.
+- `storage.ts` — the **only** module allowed to touch `localStorage` (FR-40);
+  persists theme/language/auto-accept/ICE/wake-lock/reduce-motion only.
+
+## UI
+
+```
+src/ui/App.tsx          screen switch driven by ConnectionStateMachine.snapshot()
+src/ui/components/      QrTile, Beam, CodeBox, Prompt, ProgressRow
+src/ui/i18n/            en.json, hi.json (key parity enforced by a unit test)
+```
+
+Screens map to machine states: IDLE → Home, SHOWING_OFFER/WAITING_FOR_REPLY →
+Pairing, SCANNING_OFFER → Join, SHOWING_ANSWER → Reply, CONNECTING/CONNECTED →
+Connected.
 
 ## Data flow
 

@@ -11,7 +11,10 @@ const PROD_CSP = [
   "worker-src 'self' blob:",
   "object-src 'none'",
   "base-uri 'none'",
-  "frame-ancestors 'none'",
+  // NOTE: frame-ancestors is deliberately absent. Browsers ignore it when the
+  // policy is delivered via <meta>, and it logs a console error there. Clickjacking
+  // protection must instead be set as a real HTTP header by the static host
+  // (recorded in docs/DECISIONS.md and README deploy notes).
 ].join("; ");
 
 /**
@@ -52,7 +55,7 @@ export default defineConfig({
   },
   test: {
     environment: "node",
-    include: ["tests/unit/**/*.test.ts", "tests/integration/**/*.test.ts"],
+    include: ["tests/unit/**/*.test.{ts,tsx}", "tests/integration/**/*.test.{ts,tsx}"],
     exclude: ["tests/e2e/**"],
     setupFiles: ["vitest.setup.ts"],
     testTimeout: 120_000,

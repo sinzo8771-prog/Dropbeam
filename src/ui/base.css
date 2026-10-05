@@ -438,3 +438,249 @@ dialog.sheet {
     gap: var(--s-2);
   }
 }
+
+/* ---- M4: connection screens and signature components (PRD 10.1/10.2) ---- */
+
+.screen {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-6);
+  align-items: flex-start;
+}
+
+.screen h1 {
+  font-family: var(--font-display);
+  font-size: var(--fs-2xl);
+  line-height: 1.15;
+  letter-spacing: -0.01em;
+  margin: 0;
+}
+
+.hint {
+  color: var(--ink-muted);
+  font-size: var(--fs-sm);
+  max-width: 62ch;
+}
+
+.peer-name {
+  font-family: var(--font-mono);
+  font-size: var(--fs-lg);
+  color: var(--ink);
+}
+
+.home-actions,
+.row-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s-3);
+}
+
+.row-actions {
+  width: 100%;
+}
+
+/* QR tile: black on white in both themes, 4-module quiet zone (PRD 10.2) */
+.qr-tile {
+  background: #fff;
+  color: #000;
+  padding: var(--s-4);
+  border-radius: var(--r-md);
+  border: 1px solid var(--hairline);
+  align-self: center;
+  max-width: min(100%, 360px);
+}
+
+.qr-tile-frame {
+  width: 100%;
+}
+
+.qr-tile-frame svg {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+/* Code box: mono face for anything the user must read or compare (10.2) */
+.code-box {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-2);
+  padding: var(--s-4);
+  background: var(--panel);
+  border: 1px solid var(--hairline);
+  border-radius: var(--r-md);
+  width: 100%;
+  max-width: 62ch;
+}
+
+.code-box-label {
+  font-size: var(--fs-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--ink-muted);
+}
+
+.code-box-code {
+  font-family: var(--font-mono);
+  font-size: var(--fs-sm);
+  line-height: 1.6;
+  word-break: break-all;
+  user-select: all;
+}
+
+/* Beam: the single signature animation (PRD 10.2) */
+.beam {
+  width: 120px;
+}
+
+.beam-line {
+  width: 120px;
+  height: 24px;
+}
+
+.beam.is-active .beam-line {
+  animation: beam-dash 900ms linear infinite;
+}
+
+@keyframes beam-dash {
+  to {
+    stroke-dashoffset: -18;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .beam.is-active .beam-line {
+    animation: none;
+  }
+}
+
+/* Scanner frame guide (PRD 10.1 #3) */
+.scanner-frame {
+  align-self: center;
+  width: min(100%, 320px);
+  aspect-ratio: 1;
+  border: 2px solid var(--border-strong);
+  border-radius: var(--r-lg);
+  overflow: hidden;
+  background: var(--panel);
+  display: flex;
+}
+
+.scanner-video {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+/* Transfer rows (PRD 10.1 #6) */
+.row {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-2);
+  padding: var(--s-3) 0;
+  border-bottom: 1px solid var(--hairline);
+  list-style: none;
+}
+
+.row:last-child {
+  border-bottom: none;
+}
+
+.row-head,
+.row-foot {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--s-3);
+}
+
+.row-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.row-size,
+.row-pct {
+  font-family: var(--font-mono);
+  font-size: var(--fs-xs);
+  color: var(--ink-muted);
+}
+
+.row-phase {
+  font-size: var(--fs-sm);
+  color: var(--ink-muted);
+}
+
+.row-bar {
+  height: 4px;
+  background: var(--hairline);
+  border-radius: var(--r-sm);
+  overflow: hidden;
+}
+
+.row-bar-fill {
+  height: 100%;
+  background: var(--accent);
+  /* transform-based growth: no layout thrash on every progress tick */
+  transform-origin: left center;
+  transition: transform var(--t-base) var(--ease);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .row-bar-fill {
+    transition: none;
+  }
+}
+
+/* Alerts carry a reason code + "Try again" (PRD 12) */
+.alert {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-3);
+  align-items: flex-start;
+  padding: var(--s-4);
+  border: 1px solid var(--danger);
+  border-radius: var(--r-md);
+  background: var(--panel);
+  max-width: 62ch;
+}
+
+.alert p {
+  margin: 0;
+}
+
+/* Native dialog prompt (PRD FR-13) */
+.prompt {
+  border: 1px solid var(--border-strong);
+  border-radius: var(--r-lg);
+  padding: var(--s-6);
+  background: var(--panel);
+  color: var(--ink);
+  max-width: 62ch;
+}
+
+.prompt-title {
+  font-family: var(--font-display);
+  font-size: var(--fs-lg);
+  margin: 0 0 var(--s-3);
+}
+
+.prompt-actions {
+  display: flex;
+  gap: var(--s-3);
+  justify-content: flex-end;
+  margin-top: var(--s-6);
+}
+
+.toast {
+  font-size: var(--fs-xs);
+  color: var(--ink-muted);
+}
+
+/* Hindi renders in Noto Sans Devanagari (PRD 10.2 typography) */
+:root:lang(hi),
+html[lang="hi"] {
+  font-family: "Noto Sans Devanagari", var(--font-ui);
+}

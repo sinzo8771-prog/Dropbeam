@@ -29,6 +29,7 @@
   "pair.scanReply": "Scan reply",
   "pair.pasteReply": "Paste reply",
   "pair.waiting": "Waiting for the other device…",
+  "pair.preparing": "Preparing a code…",
   "pair.waitingReply": "Waiting for the other device to scan or paste its reply…",
   "pair.noWebcam": "No camera here? Ask the other device to share its reply link and open it on this one.",
   "pair.expiresIn": "This code expires in",
