@@ -161,6 +161,26 @@ library's docs gets an entry here (PRD section 0.3).
   `CODE_INVALID`, and a guest could not reach `CONNECTED` in one hop — all fixed
   in the controller rather than worked around in the UI.
 
+## 2026-10-05 · Sinks and TransferSession: destination beats detection (M5)
+
+- **Problem:** PRD 8.5 requires FSA → OPFS → memory selection, and the receiver
+  has to stream to _somewhere_ while both halves of the engine run on one
+  channel. Two bugs made the obvious wiring wrong: `createSinkFor` ignored an
+  explicitly supplied destination whenever FSA was unavailable (so the user's
+  chosen destination was silently discarded), and `TransferSession` forwarded
+  `onSaved(fid, result)` as a single argument, handing the UI a fid number
+  instead of the `SaveResult`.
+- **Choice:** An explicit `pickDestination` always wins and only falls through
+  on non-cancel failures; feature detection only decides the fallback.
+  `TransferSession` owns Sender + Receiver, mirrors Sender's deterministic fid
+  allocation (`parity + 1 + index * 2`) so progress rows can show names before
+  the peer responds, and sanitizes outgoing filenames as well as incoming ones.
+- **Reason:** The destination is a user decision made in a gesture; feature
+  detection is only a capability guess and must never override it. Sink tests
+  exercise the chunk stream and `DISK_FULL`/`CANCELED` mapping with fake browser
+  APIs, and `transfer-session.test.ts` moves real bytes between two sessions and
+  asserts they arrive intact — which is what caught both bugs above.
+
 ## 2026-10-05 · Pairing links are fragment-carried, never percent-encoded (M3)
 
 - **Problem:** The offer/answer link (`#j=`, `#a=`) is typed, copied through

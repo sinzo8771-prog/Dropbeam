@@ -39,11 +39,15 @@ src/pwa       Service worker, manifest, icons.
 - `sender.ts` / `receiver.ts` — queue, chunking (16 KiB), accept/decline, cancel, verify.
 - `backpressure.ts` — bufferedAmount gate (pause > 1 MiB, resume at 256 KiB).
 - `hash.worker.ts` — incremental SHA-256 off the UI thread.
+- `transfer-session.ts` — binds an open channel to Sender + Receiver, negotiates
+  `hello`, and selects a storage sink per incoming file.
 
 ### core/storage
 
 - `sink.ts` — `interface Sink { open(meta); write(chunk); close(): SaveResult; abort() }`.
 - `fsa-sink.ts` / `opfs-sink.ts` / `memory-sink.ts` — runtime-selected by feature detection.
+- `select-sink.ts` — `chooseSink()` reports the path and its size limits;
+  `createSinkFor()` honours an explicit user destination first (PRD 8.5).
 - `filename.ts` — sanitization (FR-32).
 
 ### core/platform
