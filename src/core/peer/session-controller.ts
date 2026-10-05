@@ -4,6 +4,7 @@ import { decodeHandshake } from "../handshake/decode";
 import { defaultCompressionImpl, type CompressionImpl } from "../handshake/encoding";
 import { buildPairLink, extractCode, type PairKind } from "../handshake/link";
 import { ConnectionStateMachine, type MachineOptions, type Side } from "./state-machine";
+import { deriveVerificationPhrase, type VerificationPhrase } from "./verify-phrase";
 import type { ChannelLike } from "../transfer/channel";
 import { PROTOCOL_VERSION } from "../transfer/protocol";
 
@@ -68,6 +69,9 @@ export class SessionController {
   private peerName = "";
   private channel: ChannelLike | null = null;
   private error: ErrorCode | null = null;
+  /** Our own DTLS fingerprint and the peer's, for the phrase (PRD 9.3). */
+  private localFingerprint = "";
+  private remoteFingerprint = "";
 
   constructor(private readonly opts: SessionControllerOptions) {
     this.machine =
@@ -124,6 +128,7 @@ export class SessionController {
     try {
       this.machine.send("offer-created");
       const offer = await this.opts.transport.createOffer();
+      this.localFingerprint = offer.handshake.f;
       this.machine.send("gather-complete");
       await this.publish(offer.handshake, "j");
       // The guest's reply moves the host into CONNECTING (PRD 7.1).
@@ -151,10 +156,12 @@ export class SessionController {
       return this.fail(toCode(err, "CODE_INVALID"));
     }
     this.peerName = decoded.handshake?.n ?? "";
+    this.remoteFingerprint = decoded.handshake?.f ?? "";
     try {
       this.machine.send("offer-received");
       this.machine.send("answer-created");
       const answer = await this.opts.transport.createAnswer(decoded.sdp);
+      this.localFingerprint = answer.handshake.f;
       this.machine.send("gather-complete");
       await this.publish(answer.handshake, "a");
       // The answerer's channel arrives via the transport's own events.
@@ -182,6 +189,7 @@ export class SessionController {
       const channel = await this.opts.transport.applyAnswer(decoded.sdp);
       this.channel = channel;
       this.peerName = decoded.handshake?.n || this.peerName;
+      this.remoteFingerprint = decoded.handshake?.f || this.remoteFingerprint;
       // PRD 7.1: WAITING_FOR_REPLY ─reply applied─▶ CONNECTING ─▶ CONNECTED.
       this.machine.send("reply-applied");
       this.machine.send("connected");
@@ -201,6 +209,18 @@ export class SessionController {
     this.machine.send("connected");
     if (this.machine.state === "CONNECTING") this.machine.send("connected");
     return this.snapshot();
+  }
+
+  /**
+   * The man-in-the-middle check (PRD 9.3). Both sides hold one local and one
+   * remote fingerprint and sort the pair before hashing, so an attacker who
+   * substitutes a fingerprint cannot make the two devices agree. `null` until
+   * both halves are known (the guest only learns the remote one once it has
+   * decoded the offer).
+   */
+  async verificationPhrase(): Promise<VerificationPhrase | null> {
+    if (!this.localFingerprint || !this.remoteFingerprint) return null;
+    return deriveVerificationPhrase(this.localFingerprint, this.remoteFingerprint);
   }
 
   /** Protocol version this build speaks (PRD 8.4 `hello`). */
@@ -241,6 +261,9 @@ export class SessionController {
     this.link = "";
     this.channel = null;
     this.error = null;
+    // Fingerprints belong to one attempt; never carry them across sessions.
+    this.localFingerprint = "";
+    this.remoteFingerprint = "";
   }
 
   private fail(code: ErrorCode): SessionSnapshot {

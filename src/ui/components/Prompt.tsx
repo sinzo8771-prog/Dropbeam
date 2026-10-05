@@ -31,8 +31,16 @@ export function Prompt({
   useEffect(() => {
     const el = ref.current;
     if (!el) return;
-    if (open && !el.open) el.showModal?.();
-    if (!open && el.open) el.close();
+    if (typeof el.showModal === "function") {
+      // Real browsers: the top layer, focus trap and Escape come free.
+      if (open && !el.open) el.showModal();
+      if (!open && el.open) el.close();
+      return;
+    }
+    // Environments without showModal (jsdom) would otherwise render a dialog
+    // that silently never opens, making the prompt impossible to exercise.
+    // Keep the attribute in sync instead; browsers never take this path.
+    el.open = open;
   }, [open]);
 
   return (

@@ -241,3 +241,39 @@ describe("connection state machine (PRD 7.1)", () => {
     expect(seen).toEqual(["CREATING_OFFER", "GATHERING"]);
   });
 });
+
+describe("side selection (PRD 7.1)", () => {
+  /**
+   * The UI holds one machine for its whole lifetime and picks the side per
+   * attempt, so that a rebuild can never leave a screen rendering a state from
+   * a machine the controller is no longer driving.
+   */
+  it("resolves SHOWING per side and only accepts the change from IDLE", () => {
+    const machine = new ConnectionStateMachine();
+    machine.send("start");
+    machine.send("offer-created");
+    machine.send("gather-complete");
+    expect(machine.state).toBe("SHOWING_OFFER");
+
+    machine.reset();
+    machine.setSide("guest");
+    machine.send("join");
+    machine.send("offer-received");
+    machine.send("answer-created");
+    machine.send("gather-complete");
+    expect(machine.state).toBe("SHOWING_ANSWER");
+
+    // Mid-attempt the side is already implied; changing it is ignored.
+    machine.setSide("host");
+    expect(machine.state).toBe("SHOWING_ANSWER");
+  });
+
+  it("still refuses WAITING_FOR_REPLY for the guest", () => {
+    const machine = new ConnectionStateMachine({ side: "guest" });
+    machine.send("join");
+    machine.send("offer-received");
+    machine.send("answer-created");
+    machine.send("gather-complete");
+    expect(machine.send("reply-applied")).toBe(false);
+  });
+});

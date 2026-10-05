@@ -3,6 +3,7 @@ import { Beam } from "./components/Beam";
 import { CodeBox } from "./components/CodeBox";
 import { Prompt } from "./components/Prompt";
 import { QrTile } from "./components/QrTile";
+import { VerifyCard } from "./components/VerifyCard";
 import { messageForError, translatorFor, type Language } from "../core/platform/i18n";
 import { SettingsStore } from "../core/platform/storage";
 import { buildPairLink, extractCode, parsePairLink } from "../core/handshake/link";
@@ -10,6 +11,8 @@ import { planQrContent, type QrPlan } from "../core/handshake/qr-render";
 import { FRAME_INTERVAL_MS, FrameAssembler } from "../core/handshake/qr-frames";
 import { isWebRtcSupported, PeerSession } from "../core/peer/peer-session";
 import { SessionController } from "../core/peer/session-controller";
+import { ConnectionApproval } from "../core/peer/approval";
+import type { VerificationPhrase } from "../core/peer/verify-phrase";
 import { ConnectionStateMachine, type ConnectionState } from "../core/peer/state-machine";
 import type { ErrorCode } from "../core/errors";
 
@@ -57,9 +60,19 @@ export function App({ settings, baseUrl }: AppProps = {}) {
   const [toast, setToast] = useState("");
   const [copied, setCopied] = useState("");
   const [scanOpen, setScanOpen] = useState(false);
+  const [phrase, setPhrase] = useState<VerificationPhrase | null>(null);
+  const [approvalOpen, setApprovalOpen] = useState(false);
+  const [approved, setApproved] = useState(false);
   const assembler = useRef(new FrameAssembler());
   const videoRef = useRef<HTMLVideoElement>(null);
   const peerSessionRef = useRef<PeerSession | null>(null);
+  /**
+   * One controller per attempt. It is created together with the transport and
+   * reused for every later step, because the verification phrase needs the
+   * fingerprints collected across both halves of the handshake (PRD 9.3).
+   */
+  const controllerRef = useRef<SessionController | null>(null);
+  const approvalRef = useRef<ConnectionApproval | null>(null);
 
   const lang: Language = pref.language;
   const t = useMemo(() => translatorFor(lang), [lang]);
@@ -68,9 +81,19 @@ export function App({ settings, baseUrl }: AppProps = {}) {
 
   // The SessionController owns the connection state machine, so the UI and the
   // core can never disagree about where the session is (ARCHITECTURE rule 2).
-  // It is rebuilt when the side flips (Start → host, Join → guest).
+  // One machine lives for the whole app; the side for an attempt is chosen on
+  // it (Start → host, Join → guest) rather than by rebuilding it.
   const [side, setSide] = useState<"host" | "guest">("host");
-  const machine = useMemo(() => new ConnectionStateMachine({ side }), [side]);
+  const machine = useMemo(() => new ConnectionStateMachine({ side: "host" }), []);
+
+  /** Choose the side for the next attempt before driving any transition. */
+  const chooseSide = useCallback(
+    (next: "host" | "guest"): void => {
+      setSide(next);
+      machine.setSide(next);
+    },
+    [machine],
+  );
 
   useEffect(() => store.subscribe(setPref), [store]);
   useEffect(
@@ -86,6 +109,40 @@ export function App({ settings, baseUrl }: AppProps = {}) {
     return machine.subscribe((snap) => setScreen(snap.state));
   }, [machine]);
 
+  // PRD 9.3: the man-in-the-middle check. Derived from the two DTLS
+  // fingerprints once the channel is open, so it is available on both sides.
+  useEffect(() => {
+    if (screen !== "CONNECTED") {
+      setPhrase(null);
+      return;
+    }
+    let live = true;
+    void controllerRef.current?.verificationPhrase().then((p) => {
+      if (live) setPhrase(p);
+    });
+    return () => {
+      live = false;
+    };
+  }, [screen]);
+
+  // PRD 9.5: the host must explicitly allow the peer. Transfers stay blocked
+  // until then; the gate lives in core so the UI cannot enable them by mistake.
+  useEffect(() => {
+    if (screen !== "CONNECTED" || side !== "host") return;
+    let gate = approvalRef.current;
+    if (!gate) {
+      gate = new ConnectionApproval(peerName || t("connect.unknownPeer"), {
+        onPrompt: () => setApprovalOpen(true),
+        onStateChange: (state) => {
+          if (state === "allowed") setApproved(true);
+        },
+      });
+      approvalRef.current = gate;
+    }
+    // `request()` is one-shot, so re-renders never re-prompt.
+    gate.request();
+  }, [screen, side, peerName, t]);
+
   const fail = useCallback(
     (code: ErrorCode) => {
       setError(code);
@@ -100,11 +157,11 @@ export function App({ settings, baseUrl }: AppProps = {}) {
     const link = typeof location === "undefined" ? null : parsePairLink(location.hash);
     if (!link) return;
     if (link.kind === "j") {
-      setSide("guest");
+      chooseSide("guest");
       setOfferCode(link.code);
       machine.send("join");
     }
-  }, [machine]);
+  }, [machine, chooseSide]);
 
   /** "Try again" (PRD 7.1): clear the reason code, codes and assembly too. */
   const tryAgain = (): void => {
@@ -113,16 +170,47 @@ export function App({ settings, baseUrl }: AppProps = {}) {
     setOfferCode("");
     setAnswerCode("");
     setPeerName("");
+    setPhrase(null);
+    setApproved(false);
+    setApprovalOpen(false);
     assembler.current.reset();
     // PRD 7.1: cleanup closes the peer connection and stops the camera.
     peerSessionRef.current?.close();
     peerSessionRef.current = null;
+    controllerRef.current = null;
+    approvalRef.current = null;
     machine.reset();
   };
 
-  /** Build the transport + controller pair that drives one side (PRD 5.1). */
-  const makeController = (role: "host" | "guest", session: PeerSession): SessionController =>
-    new SessionController({
+  /**
+   * Build the transport + controller pair that drives one side (PRD 5.1).
+   * The controller is kept in a ref and reused for every later step of the
+   * same attempt, so the DTLS fingerprints it collects stay available.
+   */
+  const beginSession = (role: "host" | "guest"): SessionController => {
+    // A fresh attempt needs a fresh gate: PRD 9.5 approval never carries over.
+    approvalRef.current = null;
+    setApproved(false);
+    setApprovalOpen(false);
+    setPhrase(null);
+
+    const session = new PeerSession(
+      {
+        // The answerer only learns the channel opened via this event, so this
+        // is what drives the guest to CONNECTED (PRD 7.1).
+        onChannel: (channel) => {
+          const snap = controllerRef.current?.markConnected(channel);
+          if (snap) {
+            setScreen(snap.state as ConnectionState);
+            setPeerName(snap.peerName);
+          }
+        },
+        onClosed: () => fail("PEER_LOST"),
+      },
+      { ice: pref.ice, deviceName: pref.deviceName },
+    );
+    peerSessionRef.current = session;
+    const controller = new SessionController({
       side: role,
       baseUrl: base,
       transport: session,
@@ -130,18 +218,19 @@ export function App({ settings, baseUrl }: AppProps = {}) {
       // Share the UI's machine so screen and session never disagree.
       machineInstance: machine,
     });
+    controllerRef.current = controller;
+    return controller;
+  };
 
   const start = async (): Promise<void> => {
     setError(null);
-    setSide("host");
+    chooseSide("host");
     if (!isWebRtcSupported()) {
       fail("UNSUPPORTED");
       return;
     }
-    const session = new PeerSession({}, { ice: pref.ice, deviceName: pref.deviceName });
-    peerSessionRef.current = session;
     // Gathering + encoding the offer into a QR/link/paste code (FR-3).
-    const snap = await makeController("host", session).startHosting();
+    const snap = await beginSession("host").startHosting();
     setScreen(snap.state as ConnectionState);
     setOfferCode(snap.code);
     setPeerName(snap.peerName);
@@ -167,9 +256,8 @@ export function App({ settings, baseUrl }: AppProps = {}) {
       setToast("");
 
       if (side === "guest") {
-        const session = new PeerSession({}, { ice: pref.ice, deviceName: pref.deviceName });
-        peerSessionRef.current = session;
-        const snap = await makeController("guest", session).joinWithCode(event.code);
+        chooseSide("guest");
+        const snap = await beginSession("guest").joinWithCode(event.code);
         setScreen(snap.state as ConnectionState);
         setAnswerCode(snap.code);
         setPeerName(snap.peerName);
@@ -177,26 +265,24 @@ export function App({ settings, baseUrl }: AppProps = {}) {
         return;
       }
 
-      const session = peerSessionRef.current;
-      if (!session) {
+      const controller = controllerRef.current;
+      if (!controller) {
         fail("INTERNAL");
         return;
       }
-      const snap = await makeController("host", session).applyReplyCode(event.code);
+      const snap = await controller.applyReplyCode(event.code);
       setScreen(snap.state as ConnectionState);
       setPeerName(snap.peerName);
       setError(snap.error);
     },
-    [fail, pref.deviceName, pref.ice, side, t],
+    [fail, side, t],
   );
 
   /** Join flow (PRD 5.1 step 2): enter the guest state and wait for a code. */
   const join = (): void => {
     setError(null);
-    setSide("guest");
-    const session = new PeerSession({}, { ice: pref.ice, deviceName: pref.deviceName });
-    peerSessionRef.current = session;
-    makeController("guest", session).beginJoin();
+    chooseSide("guest");
+    beginSession("guest").beginJoin();
   };
 
   // The offer/answer QR shows the link (so any camera app opens the app); the
@@ -221,12 +307,21 @@ export function App({ settings, baseUrl }: AppProps = {}) {
     if (code) await acceptScanned(code);
   };
 
-  /** Join side: paste the host's offer code. */
+  /**
+   * Join side: paste the host's offer code. This has to actually answer the
+   * offer — parking the code in state left the screen parked on the camera
+   * view forever, so "Paste" silently did nothing.
+   */
   const pasteOffer = async (): Promise<void> => {
     const code = await readClipboardCode();
     if (!code) return;
-    setOfferCode(code);
-    join();
+    setError(null);
+    chooseSide("guest");
+    const snap = await beginSession("guest").joinWithCode(code);
+    setScreen(snap.state as ConnectionState);
+    setAnswerCode(snap.code);
+    setPeerName(snap.peerName);
+    setError(snap.error);
   };
 
   const readClipboardCode = async (): Promise<string | null> => {
@@ -264,11 +359,7 @@ export function App({ settings, baseUrl }: AppProps = {}) {
               <button type="button" class="btn btn-primary btn-lg" onClick={start}>
                 {t("action.start")}
               </button>
-              <button
-                type="button"
-                class="btn btn-secondary btn-lg"
-                onClick={() => machine.send("join")}
-              >
+              <button type="button" class="btn btn-secondary btn-lg" onClick={join}>
                 {t("action.join")}
               </button>
             </div>
@@ -329,12 +420,29 @@ export function App({ settings, baseUrl }: AppProps = {}) {
         ) : null}
 
         {screen === "CONNECTING" || screen === "CONNECTED" ? (
-          <section class="screen screen-connected">
+          <section
+            class="screen screen-connected"
+            // The transfer UI reads this to stay blocked until the host allows.
+            data-approval={side === "guest" ? "granted" : approved ? "allowed" : "pending"}
+          >
             <Beam active={screen === "CONNECTED"} />
             <h1>{t("connect.title")}</h1>
             {/* FR-42: the peer's label is shown as text, never markup. */}
             {peerName ? <p class="peer-name">{peerName}</p> : null}
             {screen === "CONNECTING" ? <p class="measure">{t("connect.working")}</p> : null}
+            {screen === "CONNECTED" && phrase ? (
+              <VerifyCard
+                phrase={phrase}
+                label={t("transfer.verification")}
+                help={t("transfer.verificationHelp")}
+                digitsLabel={t("transfer.verificationDigits")}
+              />
+            ) : null}
+            {screen === "CONNECTED" && side === "host" ? (
+              <p class="measure" role="status">
+                {approved ? t("connect.allowed") : t("connect.pendingApproval")}
+              </p>
+            ) : null}
           </section>
         ) : null}
 
@@ -370,6 +478,25 @@ export function App({ settings, baseUrl }: AppProps = {}) {
         declineLabel={t("action.decline")}
         onAccept={() => setScanOpen(false)}
         onDecline={() => setScanOpen(false)}
+      />
+
+      {/* PRD 9.5: the host's approval gate. Declining tears the session down
+          rather than leaving a half-open channel that looks connected. */}
+      <Prompt
+        open={approvalOpen && !approved}
+        title={t("connect.approveTitle", { name: peerName || t("connect.unknownPeer") })}
+        body={<p>{t("connect.approveBody")}</p>}
+        acceptLabel={t("connect.allow")}
+        declineLabel={t("action.decline")}
+        onAccept={() => {
+          approvalRef.current?.approve();
+          setApprovalOpen(false);
+        }}
+        onDecline={() => {
+          approvalRef.current?.deny();
+          setApprovalOpen(false);
+          fail("PEER_DECLINED");
+        }}
       />
     </div>
   );

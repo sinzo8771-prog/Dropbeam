@@ -468,6 +468,50 @@ dialog.sheet {
   color: var(--ink);
 }
 
+/* PRD 9.3 verification phrase. Mono + generous tracking so the words are
+   unambiguous when read aloud across a room. */
+.verify-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-2);
+  padding: var(--s-4);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--r-md);
+  background: var(--panel);
+  box-shadow: var(--shadow-1);
+}
+
+.verify-card-label {
+  color: var(--ink-muted);
+  font-size: var(--fs-xs);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  margin: 0;
+}
+
+.verify-card-words {
+  font-family: var(--font-mono);
+  font-size: var(--fs-xl);
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: var(--ink);
+  margin: 0;
+}
+
+.verify-card-digits {
+  font-family: var(--font-mono);
+  font-size: var(--fs-md);
+  color: var(--ink);
+  margin: 0;
+}
+
+.verify-card-digits-label {
+  color: var(--ink-muted);
+  font-size: var(--fs-xs);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
 .home-actions,
 .row-actions {
   display: flex;

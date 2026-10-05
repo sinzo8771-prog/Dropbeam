@@ -195,3 +195,75 @@ library's docs gets an entry here (PRD section 0.3).
   succeeds on the paste/link route even when the copy is imperfect; rejecting
   non-codec fragments keeps unrelated in-page anchors (e.g. `#help`) from being
   read as pairing attempts.
+
+## 2026-10-05 · Security gates live in core, not in the screen (M6)
+
+- **Problem:** PRD 9.3/9.5 add two checks at the exact moment the channel is
+  open: both devices must show the same verification phrase, and the host must
+  approve the peer before anything may move. Wiring these into the Connected
+  screen left three defects visible only under test: the guest never reached
+  `CONNECTED` because `PeerSession` was constructed with no events, so
+  `onChannel` never fired; "Paste reply" on the scan screen set the code into
+  state but never answered the offer, so pasting silently did nothing; and
+  `ConnectionApproval.request()` re-fired its prompt on every call.
+- **Choice:** The approval gate is a `ConnectionApproval` object in
+  `src/core/peer/approval.ts` with `requireAllowed()` throwing the PRD 12 reason
+  code, so transfers are blocked by the core and not by a rendered button. The
+  connected section carries `data-approval="pending|allowed|granted"` as the
+  contract the transfer UI mounts behind. `request()` is one-shot via a
+  `prompted` flag, since the UI may re-render or re-signal.
+- **Reason:** A security control that only exists in a component can be
+  rendered away; one that lives in core cannot. The phrase is derived by
+  `SessionController.verificationPhrase()` from the two DTLS fingerprints it
+  already collected — no new plumbing, and it is `null` until both are known,
+  so an unpaired session can never show a reassuring phrase.
+
+## 2026-10-05 · One state machine for the app's lifetime, side chosen per attempt (M6)
+
+- **Problem:** The UI rebuilt `ConnectionStateMachine` whenever the side
+  flipped. Because `setSide()` triggers a render, the click handler that set the
+  side went on to drive the _old_ machine, which the effect cleanup then
+  disposed — a use-after-dispose race on the Join path.
+- **Choice:** `ConnectionStateMachine.setSide()` mutates the side and is only
+  legal from `IDLE`; the UI builds exactly one machine and picks the side on it
+  per attempt. `SessionController` for an attempt is kept in a ref rather than
+  rebuilt per step, so the fingerprints it collected survive into
+  `applyReplyCode`.
+- **Reason:** One machine for the app's lifetime is the only way "the UI never
+  flips connection state directly" (ARCHITECTURE rule 2) actually holds, and it
+  removes a class of teardown races instead of papering over them.
+
+## 2026-10-05 · A deliberate close is not peer loss (M6)
+
+- **Problem:** `PeerSession.close()` raises the same `connectionstatechange` and
+  channel `close` events a dropped peer does, so "Try again" tore the session
+  down and then immediately reported `PEER_LOST`, stranding the user on an error
+  they had just dismissed.
+- **Choice:** `close()` sets a `closed` flag first and both listeners return
+  early when it is set.
+- **Reason:** Local teardown and remote loss are different events that happen to
+  share a signal. `tests/unit/peer-session.test.ts` pins both directions: a
+  local close reports nothing, a real `failed` transition still does.
+
+## 2026-10-05 · `Prompt` falls back to the `open` attribute (M6)
+
+- **Problem:** `dialog.showModal?.()` silently did nothing in jsdom, which does
+  not implement `showModal`. Every prompt test therefore asserted against a
+  dialog that was rendered but permanently closed and inaccessible to
+  `getByRole` — the approval and incoming-transfer gates were effectively
+  untestable, and the optional call hid it.
+- **Choice:** Use `showModal`/`close` when the method exists (real browsers keep
+  the top layer, focus trap and Escape) and otherwise set the `open` attribute
+  directly.
+- **Reason:** Tests must be able to click the real buttons, and an optional call
+  that can turn a security prompt into a no-op is worse than an explicit
+  fallback. Browser behaviour is unchanged.
+
+## 2026-10-05 · `frame-ancestors` belongs in an HTTP header, not the CSP meta tag (M4, confirmed in M6)
+
+- **Problem:** The shipped CSP included `frame-ancestors 'none'`. Browsers ignore
+  that directive inside a `<meta>` tag and log a console error on every load.
+- **Choice:** Removed from both the production and development policies in
+  [`index.html`](../index.html) and [`vite.config.ts`](../vite.config.ts).
+- **Reason:** Clickjacking protection has to be served as a header by the host.
+  Keeping a directive that is provably ignored only produces false assurance.

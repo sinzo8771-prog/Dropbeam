@@ -38,6 +38,13 @@
 
   "connect.title": "Connecting",
   "connect.working": "Connecting directly to the other device…",
+  "connect.approveTitle": "Allow connection from {name}?",
+  "connect.approveBody": "No files can move until you allow it. Check the verification words match if you recognise this device.",
+  "connect.allow": "Allow",
+  "connect.allowed": "Connection allowed",
+  "connect.pendingApproval": "Waiting for you to allow this connection.",
+  "connect.unknownPeer": "This device",
+  "connect.verifiedHelp": "The words match on both devices.",
 
   "transfer.title": "Transfer",
   "transfer.sending": "Sending",
@@ -52,8 +59,9 @@
   "transfer.textTitle": "Send a note",
   "transfer.textPlaceholder": "Type or paste a note…",
   "transfer.verification": "Verification words",
-  "transfer.verificationHelp": "Compare these on both devices before sending sensitive files.",
+  "transfer.verificationHelp": "Check that both devices show the same words. If they differ, disconnect.",
   "transfer.verified": "Verified",
+  "transfer.verificationDigits": "Read aloud",
 
   "settings.title": "Settings",
   "settings.theme": "Theme",

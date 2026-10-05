@@ -132,7 +132,7 @@ export function isTerminal(state: ConnectionState): boolean {
 
 export class ConnectionStateMachine {
   private raw: RawState = "IDLE";
-  private readonly hostSide: Side;
+  private hostSide: Side;
   private readonly timeouts: ConnectionTimeouts;
   private readonly listeners = new Set<Listener>();
   private readonly setTimer: (fn: () => void, ms: number) => unknown;
@@ -162,6 +162,16 @@ export class ConnectionStateMachine {
 
   get error(): ErrorCode | null {
     return this.failure;
+  }
+
+  /**
+   * Choose the side for the next attempt. Only legal from IDLE: the side
+   * belongs to an attempt, not to the app, so the UI can hold one machine for
+   * its whole lifetime instead of rebuilding (and disposing) one per click.
+   */
+  setSide(side: Side): void {
+    if (this.raw !== "IDLE") return;
+    this.hostSide = side;
   }
 
   snapshot(): MachineSnapshot {

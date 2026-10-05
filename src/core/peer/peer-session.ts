@@ -75,6 +75,9 @@ export class PeerSession {
     const factory = this.opts.peerConnectionFactory ?? defaultFactory;
     const pc = factory(config as RTCConfiguration);
     pc.addEventListener("connectionstatechange", () => {
+      // A deliberate local `close()` also raises `closed`, which is not peer
+      // loss — reporting it would raise an error while we are tearing down.
+      if (this.closed) return;
       this.events.onStateChange?.(pc.connectionState);
       if (pc.connectionState === "closed" || pc.connectionState === "failed") {
         this.events.onClosed?.();
@@ -174,6 +177,9 @@ export class PeerSession {
       if (this.channel.readyState === "open") this.resolveChannel?.(this.channel);
     });
     dc.addEventListener("close", () => {
+      // Same reasoning as the connection-state listener: our own teardown
+      // must not masquerade as the peer disappearing.
+      if (this.closed) return;
       this.rejectChannel?.(new DropbeamError("PEER_LOST", "data channel closed"));
     });
   }

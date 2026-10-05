@@ -38,6 +38,13 @@
 
   "connect.title": "कनेक्ट हो रहा है",
   "connect.working": "दूसरे उपकरण से सीधे कनेक्ट हो रहा है…",
+  "connect.approveTitle": "{name} से कनेक्शन की अनुमति दें?",
+  "connect.approveBody": "अनुमति दिए बिना कोई फ़ाइल नहीं जा सकती। अगर यह उपकरण पहचान में आता है तो सत्यापन शब्द मिलाएँ।",
+  "connect.allow": "अनुमति दें",
+  "connect.allowed": "कनेक्शन की अनुमति दी गई",
+  "connect.pendingApproval": "इस कनेक्शन की अनुमति का इंतज़ार।",
+  "connect.unknownPeer": "यह उपकरण",
+  "connect.verifiedHelp": "दोनों उपकरणों पर शब्द मेल खाते हैं।",
 
   "transfer.title": "स्थानांतरण",
   "transfer.sending": "भेजा जा रहा है",
@@ -52,8 +59,9 @@
   "transfer.textTitle": "नोट भेजें",
   "transfer.textPlaceholder": "नोट टाइप या पेस्ट करें…",
   "transfer.verification": "सत्यापन शब्द",
-  "transfer.verificationHelp": "संवेदनशील फ़ाइलें भेजने से पहले दोनों उपकरणों पर इन्हें मिलाएँ।",
+  "transfer.verificationHelp": "जाँचें कि दोनों उपकरण एक ही शब्द दिखा रहे हैं। अगर अलग हैं, तो कनेक्शन तोड़ें।",
   "transfer.verified": "सत्यापित",
+  "transfer.verificationDigits": "बोलकर सुनाएँ",
 
   "settings.title": "सेटिंग",
   "settings.theme": "थीम",

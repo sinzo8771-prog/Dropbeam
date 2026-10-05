@@ -1,14 +1,21 @@
 // @vitest-environment jsdom
 import { describe, expect, it, vi } from "vitest";
-import { render, screen, fireEvent, cleanup, waitFor } from "@testing-library/preact";
+import { render, screen, fireEvent, cleanup, waitFor, within } from "@testing-library/preact";
 import { afterEach } from "vitest";
 import { QrTile } from "../../src/ui/components/QrTile";
 import { CodeBox, groupCode } from "../../src/ui/components/CodeBox";
 import { ProgressRow, formatBytes } from "../../src/ui/components/ProgressRow";
 import { Prompt } from "../../src/ui/components/Prompt";
 import { Beam } from "../../src/ui/components/Beam";
+import { VerifyCard } from "../../src/ui/components/VerifyCard";
 import { App } from "../../src/ui/App";
 import { SettingsStore, type KeyValueStore } from "../../src/core/platform/storage";
+import { SessionController, type PeerTransport } from "../../src/core/peer/session-controller";
+import { buildSdp } from "../../src/core/handshake/sdp-template";
+import type { Handshake } from "../../src/core/handshake/codec-db1";
+import { toBase64Url } from "../../src/core/handshake/encoding";
+import { MemoryChannel } from "../helpers/memory-channel";
+import type { ChannelLike } from "../../src/core/transfer/channel";
 
 afterEach(cleanup);
 
@@ -174,6 +181,34 @@ describe("Prompt (PRD FR-13)", () => {
     expect(dialog?.getAttribute("aria-labelledby")).toBe("prompt-title");
     expect(screen.getByText("Send 2 files?")).toBeTruthy();
     expect(screen.getByText("Accept")).toBeTruthy();
+    // `open` must actually be set, or the prompt is invisible and unusable.
+    expect((dialog as HTMLDialogElement).open).toBe(true);
+    // Its buttons are reachable, which is what the incoming-transfer gate needs.
+    expect(within(dialog as HTMLElement).getByRole("button", { name: "Accept" })).toBeTruthy();
+  });
+
+  it("closes when `open` goes back to false", () => {
+    const { container, rerender } = render(
+      <Prompt
+        open
+        title="Send 2 files?"
+        acceptLabel="Accept"
+        declineLabel="Decline"
+        onAccept={() => {}}
+        onDecline={() => {}}
+      />,
+    );
+    rerender(
+      <Prompt
+        open={false}
+        title="Send 2 files?"
+        acceptLabel="Accept"
+        declineLabel="Decline"
+        onAccept={() => {}}
+        onDecline={() => {}}
+      />,
+    );
+    expect((container.querySelector("dialog") as HTMLDialogElement).open).toBe(false);
   });
 });
 
@@ -189,6 +224,25 @@ describe("Beam (PRD 10.2)", () => {
     const reduced = render(<Beam active reduceMotion />);
     // With reduceMotion the dash pattern (the animated part) is omitted.
     expect(reduced.container.querySelector("line")?.getAttribute("stroke-dasharray")).toBeNull();
+  });
+});
+
+describe("VerifyCard (PRD 9.3)", () => {
+  it("shows the words and the read-aloud digits from the phrase", () => {
+    const { container } = render(
+      <VerifyCard
+        phrase={{ words: ["maple", "harbor", "quartz"], digits: "042718" }}
+        label="Verification words"
+        help="Check that both devices show the same words."
+        digitsLabel="Read aloud"
+      />,
+    );
+    expect(container.querySelector(".verify-card-words")?.textContent).toBe("maple harbor quartz");
+    expect(screen.getByText("042718")).toBeTruthy();
+    // Labelled for assistive tech, since it is the MITM check.
+    expect(container.querySelector(".verify-card")?.getAttribute("aria-label")).toBe(
+      "Verification words",
+    );
   });
 });
 
@@ -271,6 +325,200 @@ describe("App (PRD 10.1 screens)", () => {
       ).toBeTruthy();
     } finally {
       vi.unstubAllGlobals();
+    }
+  });
+});
+
+/**
+ * A second real device, used to answer the host's offer with a genuine DB1
+ * code (PRD 5.1). Only its transport is faked, so the host really decodes
+ * the peer's label and DTLS fingerprint — which is what the connected-screen
+ * security UI is built on.
+ */
+async function guestAnswering(offerCode: string, name = "Phone"): Promise<string> {
+  const hs = (type: "o" | "a"): Handshake => ({
+    v: 1,
+    t: type,
+    ts: Math.floor(Date.now() / 1000),
+    u: "Zx9+Qk",
+    p: "p4ssw0rdBASE64abcDEF123",
+    f: toBase64Url(new Uint8Array(32).fill(type === "o" ? 0xab : 0x3c)),
+    s: type === "o" ? "actpass" : "active",
+    c: ["1|2122260223|udp|192.168.1.9|54322|host"],
+    m: { sp: 5000, mms: 1048576 },
+    n: type === "o" ? undefined : name,
+  });
+  const transport: PeerTransport = {
+    async createOffer() {
+      const h = hs("o");
+      return { sdp: buildSdp(h), handshake: h };
+    },
+    async createAnswer() {
+      const h = hs("a");
+      return { sdp: buildSdp(h), handshake: h };
+    },
+    async applyAnswer() {
+      return new MemoryChannel({}) as unknown as ChannelLike;
+    },
+    close() {
+      /* nothing to release */
+    },
+  };
+  const snap = await new SessionController({
+    side: "guest",
+    baseUrl: "https://dropbeam.example",
+    transport,
+    // `publish()` sets `n` from deviceName, so the label has to come from here.
+    deviceName: name,
+  }).joinWithCode(offerCode);
+  return snap.code;
+}
+
+/**
+ * A data-channel-only stub whose channel opens right after the remote
+ * description is applied, so the host really reaches CONNECTED. jsdom has no
+ * RTCPeerConnection, so the whole host flow has to be stubbed to exercise the
+ * connected screen (PRD 9.3/9.5 wiring).
+ */
+function stubWebRtc(): () => void {
+  class FakeDataChannel {
+    binaryType = "";
+    readyState = "connecting";
+    private handlers = new Map<string, () => void>();
+    addEventListener(type: string, fn: () => void) {
+      this.handlers.set(type, fn);
+    }
+    close() {
+      this.readyState = "closed";
+      this.handlers.get("close")?.();
+    }
+    open() {
+      this.readyState = "open";
+      this.handlers.get("open")?.();
+    }
+  }
+
+  vi.stubGlobal(
+    "RTCPeerConnection",
+    class {
+      iceGatheringState = "complete";
+      connectionState = "new";
+      localDescription: RTCSessionDescriptionInit | null = null;
+      private handlers = new Map<string, () => void>();
+      private channel = new FakeDataChannel();
+      addEventListener(type: string, fn: () => void) {
+        this.handlers.set(type, fn);
+      }
+      removeEventListener(type: string) {
+        this.handlers.delete(type);
+      }
+      async createOffer() {
+        return { type: "offer", sdp: OFFER_SDP };
+      }
+      async setLocalDescription() {
+        this.localDescription = { type: "offer", sdp: OFFER_SDP };
+      }
+      async setRemoteDescription() {
+        // The answer is in place; the channel opens on the next tick, as it
+        // would once DTLS finished.
+        setTimeout(() => this.channel.open(), 0);
+      }
+      createDataChannel() {
+        return this.channel;
+      }
+      close() {
+        this.connectionState = "closed";
+        this.handlers.get("connectionstatechange")?.();
+      }
+    },
+  );
+
+  return () => {
+    vi.unstubAllGlobals();
+  };
+}
+
+/** jsdom has no clipboard; the paste routes read from it (FR-6). */
+function stubClipboard(text: () => string | Promise<string>): void {
+  Object.defineProperty(navigator, "clipboard", {
+    value: { readText: async () => text(), writeText: async () => {} },
+    configurable: true,
+  });
+}
+
+describe("App connected screen (PRD 9.3, 9.5)", () => {
+  it("shows the host approval prompt and the verification phrase once connected", async () => {
+    const restore = stubWebRtc();
+    try {
+      render(<App settings={freshSettings()} baseUrl="https://dropbeam.example" />);
+      fireEvent.click(screen.getByText("Start"));
+      await waitFor(() => expect(screen.getByTestId("code-text")).toBeTruthy());
+      const offerCode = (screen.getByTestId("code-text").textContent ?? "").replace(/ /g, "");
+
+      // The second device answers, and the host pastes the reply.
+      let answerCode = "";
+      stubClipboard(async () => {
+        answerCode = answerCode || (await guestAnswering(offerCode));
+        return answerCode;
+      });
+      fireEvent.click(screen.getByRole("button", { name: "Paste reply" }));
+
+      // PRD 9.5: the host is asked before anything may move.
+      const prompt = await screen.findByText("Allow connection from Phone?");
+      expect(prompt).toBeTruthy();
+      const dialog = prompt.closest("dialog") as HTMLDialogElement;
+      // It must be a real, open modal — not just text sitting in the page.
+      // Preact flushes effects after commit, so the open lands a tick later.
+      await waitFor(() => expect(dialog.open).toBe(true));
+      const connected = document.querySelector(".screen-connected") as HTMLElement;
+      expect(connected.dataset.approval).toBe("pending");
+
+      // PRD 9.3: the phrase from both fingerprints, shown on the connected screen.
+      // It is derived asynchronously (SHA-256), so wait for the words to land.
+      await waitFor(() =>
+        expect(document.querySelector(".verify-card-words")?.textContent?.split(" ").length).toBe(
+          3,
+        ),
+      );
+      expect(document.querySelector(".verify-card-digits")?.textContent).toMatch(/\d{6}/);
+
+      // Allowing is what lifts the block.
+      fireEvent.click(within(dialog).getByRole("button", { name: "Allow" }));
+      await waitFor(() =>
+        expect(document.querySelector(".screen-connected")?.getAttribute("data-approval")).toBe(
+          "allowed",
+        ),
+      );
+      expect(dialog.open).toBe(false);
+    } finally {
+      restore();
+    }
+  });
+
+  it("declining tears the session down instead of leaving it half-open", async () => {
+    const restore = stubWebRtc();
+    try {
+      render(<App settings={freshSettings()} baseUrl="https://dropbeam.example" />);
+      fireEvent.click(screen.getByText("Start"));
+      await waitFor(() => expect(screen.getByTestId("code-text")).toBeTruthy());
+      const offerCode = (screen.getByTestId("code-text").textContent ?? "").replace(/ /g, "");
+
+      let answerCode = "";
+      stubClipboard(async () => {
+        answerCode = answerCode || (await guestAnswering(offerCode));
+        return answerCode;
+      });
+      fireEvent.click(screen.getByRole("button", { name: "Paste reply" }));
+      const prompt = await screen.findByText("Allow connection from Phone?");
+      const dialog = prompt.closest("dialog") as HTMLDialogElement;
+      await waitFor(() => expect(dialog.open).toBe(true));
+
+      fireEvent.click(within(dialog).getByRole("button", { name: "Decline" }));
+      // A denial surfaces the PRD reason code rather than a live-looking screen.
+      expect(screen.getByRole("alert").textContent).toContain("The other device declined.");
+      expect(document.querySelector(".verify-card")).toBeNull();
+    } finally {
+      restore();
     }
   });
 });
