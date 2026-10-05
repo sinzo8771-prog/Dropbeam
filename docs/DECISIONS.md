@@ -88,3 +88,38 @@ library's docs gets an entry here (PRD section 0.3).
   unusable-candidate = dropped) keeps peer input from ever throwing mid-SDP;
   expiry is enforced at decode time so stale pasted codes die client-side with
   no backend.
+
+## 2026-10-05 · QR delivery: link-first, encoder-decided budget (M3)
+
+- **Problem:** FR-4 requires a multi-frame fallback when a code does not fit one
+  QR, and PRD 8.2.3 prefers QRing the _link_ so any camera app opens the app.
+  Neither decision can be made from a byte-count constant: the QR capacity
+  depends on error-correction level, character mode and the URL length.
+- **Choice:** `fitsSingleQr` asks uqr itself whether the content fits
+  version ≤ 25 at ECC M (PRD 8.2.4 target) and reports false instead of
+  throwing; `planQrContent` then chooses link QR → raw-code QR → multi-frame.
+  Frames are `DBF|<id>|<index>|<total>|<payload>`, sized by fixed-point
+  iteration against the final digit width so no frame exceeds 400 bytes;
+  `FrameAssembler` accepts frames in any order, ignores duplicates, restarts on
+  a new id, and drops same-id frames with a contradictory total. Scanning
+  prefers native `BarcodeDetector` and lazily loads jsQR only as fallback, with
+  duplicate text suppressed (re-emitted after 3 s) so a static QR fires once.
+- **Reason:** The encoder is the only authority on capacity, so the budget stays
+  correct if ECC or charset changes; link-first keeps camera apps working as
+  fallback; tolerant assembly matches how animated QRs actually scan (dropped
+  and repeated frames are the norm, not the exception).
+
+## 2026-10-05 · Pairing links are fragment-carried, never percent-encoded (M3)
+
+- **Problem:** The offer/answer link (`#j=`, `#a=`) is typed, copied through
+  messengers and scanned by third-party camera apps, so it must survive
+  whitespace, re-encoding and truncation noise.
+- **Choice:** `buildPairLink` emits the code verbatim after
+  `#<kind>=` — every code character is base64url plus a dotted prefix, so it is
+  already fragment-safe — and `parsePairLink`/`extractCode` accept a full URL, a
+  bare fragment, or a fragment with or without `#`, stripping whitespace and
+  tolerating (but not requiring) percent-encoding.
+- **Reason:** Round-tripping text that users and apps mangle means pairing
+  succeeds on the paste/link route even when the copy is imperfect; rejecting
+  non-codec fragments keeps unrelated in-page anchors (e.g. `#help`) from being
+  read as pairing attempts.

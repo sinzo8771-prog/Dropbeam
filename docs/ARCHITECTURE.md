@@ -19,6 +19,8 @@ src/pwa       Service worker, manifest, icons.
 - `codec-db0.ts` — full-SDP fallback (`DB0.` prefix). Both codecs decode on receive.
 - `sdp-template.ts` — rebuilds a data-channel-only SDP from a Handshake.
 - `qr-frames.ts` — multi-frame QR split/assemble (`DBF|id|index|total|payload`).
+- `qr-render.ts` — single-QR size budget (uqr version ≤ 25, ECC M) + SVG render.
+- `link.ts` — share links (`#j=` offer / `#a=` answer) and scan-text → code.
 
 ### core/peer
 
@@ -44,6 +46,9 @@ src/pwa       Service worker, manifest, icons.
 
 Feature detection, wake lock, clipboard, camera. Only modules allowed to touch
 these DOM APIs from core.
+
+- `scanner.ts` — camera QR scanning: native `BarcodeDetector` when available,
+  else a polling canvas loop with lazily-imported jsQR.
 
 ## Data flow
 

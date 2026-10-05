@@ -13,10 +13,11 @@ Commands:
 ## Unit (`tests/unit`)
 
 Codecs (round trip, size budget, invalid input), SDP template, compact candidate
-parsing, multi-frame QR assemble/shuffle/duplicates, filename sanitizer
-(table-driven with hostile inputs), protocol encode/decode, backpressure
-controller (simulated `bufferedAmount`), state machine transitions and timeouts,
-verification phrase determinism (PRD 13.1).
+parsing, multi-frame QR assemble/shuffle/duplicates, pairing-link build/parse,
+single-QR budget vs multi-frame fallback, QR pixel round trip (uqr → jsQR),
+filename sanitizer (table-driven with hostile inputs), protocol encode/decode,
+backpressure controller (simulated `bufferedAmount`), state machine transitions
+and timeouts, verification phrase determinism (PRD 13.1).
 
 ## Integration (`tests/integration`)
 
