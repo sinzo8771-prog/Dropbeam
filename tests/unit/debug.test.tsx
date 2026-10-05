@@ -304,4 +304,38 @@ describe("DebugGesture (hidden reveal)", () => {
     edgeTap();
     expect(onOpen).toHaveBeenCalledTimes(1);
   });
+
+  it("continues the count when the next tap is 699 ms later", () => {
+    const onOpen = vi.fn();
+    render(<DebugGesture onOpen={onOpen} />);
+    // The window is strictly less than 700 ms, so a
+    // 699 ms gap still counts: the second tap continues
+    // at 2 and the gesture completes on the eighth tap
+    // overall — five more after it. (A decay here would
+    // leave the count at 7 and the panel hidden.)
+    edgeTap();
+    vi.advanceTimersByTime(699);
+    edgeTap();
+    for (let i = 0; i < 5; i++) edgeTap();
+    expect(onOpen).not.toHaveBeenCalled();
+    edgeTap();
+    expect(onOpen).toHaveBeenCalledTimes(1);
+  });
+
+  it("decays the count when the next tap is exactly 700 ms later", () => {
+    const onOpen = vi.fn();
+    render(<DebugGesture onOpen={onOpen} />);
+    // At exactly 700 ms the gap is no longer inside the
+    // window: the second tap decays to 1, so the gesture
+    // needs the decayed tap plus seven more — nine taps
+    // overall. (Continuing the count here would open the
+    // panel on the eighth tap instead.)
+    edgeTap();
+    vi.advanceTimersByTime(700);
+    edgeTap();
+    for (let i = 0; i < 6; i++) edgeTap();
+    expect(onOpen).not.toHaveBeenCalled();
+    edgeTap();
+    expect(onOpen).toHaveBeenCalledTimes(1);
+  });
 });
