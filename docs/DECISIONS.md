@@ -41,3 +41,29 @@ library's docs gets an entry here (PRD section 0.3).
 - **Problem:** Fonts must be self-hosted WOFF2, OFL/open licensed, no third-party font requests (10.2, 9.1).
 - **Choice:** `scripts/fetch-fonts.mjs` runs at development time only; it downloads Fraunces, Instrument Sans, JetBrains Mono and Noto Sans Devanagari (latin subsets) from Google Fonts into `src/ui/fonts/` and generates `src/ui/fonts.css`. Content-hash filenames dedupe identical variable files.
 - **Reason:** Runtime has zero third-party requests; the fetch script is never imported by app code.
+
+## 2026-10-05 · Transfer-engine protocol choices (M1)
+
+- **Problem:** The PRD specifies phases and integrity rules (7.2, 8.4, FR-14..FR-20)
+  but not the wire details: frame layout, fid uniqueness, flow control, and how
+  `ok`/`err`/`cancel` reference files.
+- **Choice:** 16 KiB chunks; data frame `[1B type=0x01][4B fid BE][4B seq BE][payload]`;
+  fids allocated with direction parity (offerer uses odd, answerer even) so
+  `{fid}` control messages are unambiguous; backpressure pauses above 1 MiB
+  buffered and resumes at ≤256 KiB; offers are serialized (one batch in flight);
+  the receiver opens every sink _before_ replying `accept` (so no data frame can
+  arrive for an unknown fid); the sender keeps a `pendingErrors` map so an `err`
+  arriving before `done` still rejects the right file.
+- **Reason:** Each rule closes a concrete race or ambiguity observed while
+  writing the integration tests (early `err`, unknown-fid frames, buffer bloat).
+
+## 2026-10-05 · Hashing: Worker with synchronous fallback (M1)
+
+- **Problem:** SHA-256 over multi-hundred-MB files must not block the UI thread,
+  but Worker module loading fails under some test/jsdom setups.
+- **Choice:** `hash.ts` tries a module Worker (`hash.worker.ts`) first and falls
+  back to an inline `hash-wasm` hasher when `Worker` is unavailable or fails to
+  load. Both implement the same `Hasher` interface; tests exercise the fallback
+  path automatically.
+- **Reason:** Same code path in prod and tests, no test-only branches, and the
+  fallback also covers browsers where workers are blocked (e.g. some CSPs).
