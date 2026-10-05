@@ -5,15 +5,13 @@ import { Prompt } from "./components/Prompt";
 import { QrTile } from "./components/QrTile";
 import { messageForError, translatorFor, type Language } from "../core/platform/i18n";
 import { SettingsStore } from "../core/platform/storage";
-import { decodeHandshake } from "../core/handshake/decode";
-import { encodeDb1 } from "../core/handshake/codec-db1";
-import { defaultCompressionImpl } from "../core/handshake/encoding";
 import { buildPairLink, extractCode, parsePairLink } from "../core/handshake/link";
 import { planQrContent, type QrPlan } from "../core/handshake/qr-render";
 import { FRAME_INTERVAL_MS, FrameAssembler } from "../core/handshake/qr-frames";
 import { isWebRtcSupported, PeerSession } from "../core/peer/peer-session";
+import { SessionController } from "../core/peer/session-controller";
 import { ConnectionStateMachine, type ConnectionState } from "../core/peer/state-machine";
-import { DropbeamError, type ErrorCode } from "../core/errors";
+import type { ErrorCode } from "../core/errors";
 
 /**
  * Application shell (PRD 10.1). Renders whichever screen the connection state
@@ -68,8 +66,9 @@ export function App({ settings, baseUrl }: AppProps = {}) {
   const base =
     baseUrl ?? (typeof location !== "undefined" ? location.origin : "https://dropbeam.example");
 
-  // The machine is recreated when the side flips (Start vs Join); it is the only
-  // thing allowed to move the connection forward (ARCHITECTURE rule 2).
+  // The SessionController owns the connection state machine, so the UI and the
+  // core can never disagree about where the session is (ARCHITECTURE rule 2).
+  // It is rebuilt when the side flips (Start → host, Join → guest).
   const [side, setSide] = useState<"host" | "guest">("host");
   const machine = useMemo(() => new ConnectionStateMachine({ side }), [side]);
 
@@ -100,8 +99,11 @@ export function App({ settings, baseUrl }: AppProps = {}) {
   useEffect(() => {
     const link = typeof location === "undefined" ? null : parsePairLink(location.hash);
     if (!link) return;
-    setOfferCode(link.kind === "j" ? link.code : "");
-    if (link.kind === "j") machine.send("join");
+    if (link.kind === "j") {
+      setSide("guest");
+      setOfferCode(link.code);
+      machine.send("join");
+    }
   }, [machine]);
 
   /** "Try again" (PRD 7.1): clear the reason code, codes and assembly too. */
@@ -118,47 +120,39 @@ export function App({ settings, baseUrl }: AppProps = {}) {
     machine.reset();
   };
 
+  /** Build the transport + controller pair that drives one side (PRD 5.1). */
+  const makeController = (role: "host" | "guest", session: PeerSession): SessionController =>
+    new SessionController({
+      side: role,
+      baseUrl: base,
+      transport: session,
+      deviceName: pref.deviceName,
+      // Share the UI's machine so screen and session never disagree.
+      machineInstance: machine,
+    });
+
   const start = async (): Promise<void> => {
     setError(null);
     setSide("host");
-    machine.send("start");
     if (!isWebRtcSupported()) {
       fail("UNSUPPORTED");
       return;
     }
-    machine.send("offer-created");
-    machine.send("gather-complete");
-    try {
-      // Gather, then encode the offer into a QR/link/paste code (FR-3).
-      const session = new PeerSession({}, { ice: pref.ice, deviceName: pref.deviceName });
-      const offer = await session.createOffer();
-      const code = await encodeDb1(offer.handshake, { impl: await defaultCompressionImpl() });
-      peerSessionRef.current = session;
-      setOfferCode(code);
-      // The host shows its offer, then waits for the guest's reply (PRD 5.1).
-      machine.send("reply-applied");
-    } catch (err) {
-      peerSessionRef.current?.close();
-      peerSessionRef.current = null;
-      fail(err instanceof DropbeamError ? err.code : "ICE_GATHER_TIMEOUT");
-    }
+    const session = new PeerSession({}, { ice: pref.ice, deviceName: pref.deviceName });
+    peerSessionRef.current = session;
+    // Gathering + encoding the offer into a QR/link/paste code (FR-3).
+    const snap = await makeController("host", session).startHosting();
+    setScreen(snap.state as ConnectionState);
+    setOfferCode(snap.code);
+    setPeerName(snap.peerName);
+    setError(snap.error);
   };
 
-  /** Join flow (PRD 5.1 step 2): the offer is in state; build and show an answer. */
-  const join = (): void => {
-    setError(null);
-    setSide("guest");
-    machine.send("offer-received");
-    if (!isWebRtcSupported()) {
-      fail("UNSUPPORTED");
-      return;
-    }
-    machine.send("answer-created");
-    machine.send("gather-complete");
-    // The answer QR is what the host scans back (FR-6).
-    setAnswerCode(offerCode);
-  };
-
+  /**
+   * One scanned/pasted string drives whichever side we are (PRD 5.1):
+   * - host in WAITING_FOR_REPLY → the guest's answer, then CONNECTED;
+   * - guest in SCANNING_OFFER → the host's offer, then show our answer.
+   */
   const acceptScanned = useCallback(
     async (text: string) => {
       const event = assembler.current.feed(text);
@@ -171,27 +165,39 @@ export function App({ settings, baseUrl }: AppProps = {}) {
         return;
       }
       setToast("");
-      try {
-        const decoded = await decodeHandshake(event.code);
-        setPeerName(decoded.handshake?.n ?? "");
-        if (machine.state === "SHOWING_ANSWER") {
-          // Guest: we just showed our answer; the host applies it.
-          setAnswerCode(event.code);
-          return;
-        }
-        machine.send("reply-applied");
-      } catch (err) {
-        fail(err instanceof Error && "code" in err ? (err.code as ErrorCode) : "CODE_INVALID");
+
+      if (side === "guest") {
+        const session = new PeerSession({}, { ice: pref.ice, deviceName: pref.deviceName });
+        peerSessionRef.current = session;
+        const snap = await makeController("guest", session).joinWithCode(event.code);
+        setScreen(snap.state as ConnectionState);
+        setAnswerCode(snap.code);
+        setPeerName(snap.peerName);
+        setError(snap.error);
+        return;
       }
+
+      const session = peerSessionRef.current;
+      if (!session) {
+        fail("INTERNAL");
+        return;
+      }
+      const snap = await makeController("host", session).applyReplyCode(event.code);
+      setScreen(snap.state as ConnectionState);
+      setPeerName(snap.peerName);
+      setError(snap.error);
     },
-    [fail, machine, t],
+    [fail, pref.deviceName, pref.ice, side, t],
   );
 
-  useEffect(() => {
-    if (screen !== "WAITING_FOR_REPLY") return;
-    const link = typeof location === "undefined" ? null : parsePairLink(location.hash);
-    if (link?.kind === "a") void acceptScanned(link.code);
-  }, [screen, acceptScanned]);
+  /** Join flow (PRD 5.1 step 2): enter the guest state and wait for a code. */
+  const join = (): void => {
+    setError(null);
+    setSide("guest");
+    const session = new PeerSession({}, { ice: pref.ice, deviceName: pref.deviceName });
+    peerSessionRef.current = session;
+    makeController("guest", session).beginJoin();
+  };
 
   // The offer/answer QR shows the link (so any camera app opens the app); the
   // code itself is offered as text and for multi-frame fallback (FR-3, FR-4).

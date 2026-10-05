@@ -140,6 +140,27 @@ library's docs gets an entry here (PRD section 0.3).
   off the layout path preserves the 60fps budget while remaining accessible, and
   it satisfies the detector rule that DoD 11 requires to report zero findings.
 
+## 2026-10-05 · SessionController: one machine, injected transport (M4)
+
+- **Problem:** The UI had grown its own copy of the pairing flow (create offer,
+  encode, apply answer) alongside `ConnectionStateMachine`, so the screen and
+  the session could drift — they already had: two machines disagreed and the
+  pairing screen never appeared. Testing the flow was also impossible without a
+  browser, because it was baked into a Preact component.
+- **Choice:** `SessionController` owns the whole host↔guest flow and takes an
+  injected `PeerTransport` (the only thing that touches WebRTC) plus an
+  _optional shared_ `ConnectionStateMachine`. The UI passes its own machine in,
+  so there is exactly one source of truth for connection state. Replies are run
+  through `extractCode`, so a bare code and a `#a=`/`#j=` link are the same
+  input (FR-3/FR-6), and both sides accept either.
+- **Reason:** Pairing is now covered by an integration test that runs two real
+  sessions against real DB1 codes with only the transport faked, so encode,
+  decode, expiry, the link route and every transition are exercised without a
+  browser. Three defects surfaced immediately: the host sent `connected`
+  without first applying the reply, replies arriving as links were rejected as
+  `CODE_INVALID`, and a guest could not reach `CONNECTED` in one hop — all fixed
+  in the controller rather than worked around in the UI.
+
 ## 2026-10-05 · Pairing links are fragment-carried, never percent-encoded (M3)
 
 - **Problem:** The offer/answer link (`#j=`, `#a=`) is typed, copied through

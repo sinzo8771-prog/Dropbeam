@@ -28,6 +28,10 @@ src/pwa       Service worker, manifest, icons.
   (PRD FR-2), offer/answer lifecycle.
 - `state-machine.ts` — the connection state machine of PRD 7.1 (single source of truth).
 - `ice-config.ts` — Local mode (`iceServers: []`) vs opt-in STUN mode.
+- `session-controller.ts` — drives one side of a pairing end to end
+  (`startHosting` / `joinWithCode` / `applyReplyCode`) over an injected
+  `PeerTransport`, sharing the caller's state machine so the UI never runs a
+  second one.
 
 ### core/transfer
 
