@@ -67,3 +67,24 @@ library's docs gets an entry here (PRD section 0.3).
   path automatically.
 - **Reason:** Same code path in prod and tests, no test-only branches, and the
   fallback also covers browsers where workers are blocked (e.g. some CSPs).
+
+## 2026-10-05 · Handshake codecs: DB1 with SDP fallback (M2)
+
+- **Problem:** The QR/link/paste handshake (8.2) must carry full WebRTC
+  credentials in a short, manually-typable code while still interoperating with
+  browsers that reject rebuilt SDP, and every code is untrusted input.
+- **Choice:** `DB1.` = short-key JSON (`{v,t,ts,u,p,f,s,c,m?,n?}`) → `deflate-raw`
+  → base64url, validated field-by-field with a 10-minute TTL ±60s clock skew
+  (FR-7); `DB0.` = full rebuilt SDP (BUNDLE, `m=application`, SCTP 5000,
+  sha-256 fingerprint, non-trickle candidates + `end-of-candidates`) as the
+  fallback — `decodeHandshake` dispatches on prefix. Candidates use the compact
+  `<foundation>|<prio>|<proto>|<addr>|<port>|<type>` form, UDP host/srflx only
+  (component 1, no TCP/relay/prflx/link-local/mDNS-exempted `.local` kept as
+  host), capped at 6 (8.2.2). Compression is native `CompressionStream` with
+  `fflate` fallback (8.1); every inflate/decode failure is normalized to
+  `DropbeamError("CODE_INVALID")`, with a 1 MiB inflation cap against bombs.
+- **Reason:** One dispatcher covers both browsers (strict SDP) and QR-friendly
+  payloads; treating parsing and policy separately (malformed = fatal,
+  unusable-candidate = dropped) keeps peer input from ever throwing mid-SDP;
+  expiry is enforced at decode time so stale pasted codes die client-side with
+  no backend.
