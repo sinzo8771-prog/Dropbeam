@@ -287,4 +287,21 @@ describe("DebugGesture (hidden reveal)", () => {
     }
     expect(onOpen).not.toHaveBeenCalled();
   });
+
+  it("decays to a count of exactly one, not zero", () => {
+    const onOpen = vi.fn();
+    render(<DebugGesture onOpen={onOpen} />);
+    // A tap, then a gap past the window: the decayed count
+    // must be exactly 1 — so the tap after the gap plus
+    // seven more complete the gesture. Seven rapid taps
+    // after the gap must not open it (that would fail if
+    // the decay left 2 or more), and the eighth must (a
+    // reset-to-zero would still sit at 7 and stay hidden).
+    edgeTap();
+    vi.advanceTimersByTime(701);
+    for (let i = 0; i < 7; i++) edgeTap();
+    expect(onOpen).not.toHaveBeenCalled();
+    edgeTap();
+    expect(onOpen).toHaveBeenCalledTimes(1);
+  });
 });
