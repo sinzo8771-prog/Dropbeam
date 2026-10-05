@@ -4,6 +4,8 @@ import { CodeBox } from "./components/CodeBox";
 import { Prompt } from "./components/Prompt";
 import { QrTile } from "./components/QrTile";
 import { VerifyCard } from "./components/VerifyCard";
+import { TransferPanel } from "./components/TransferPanel";
+import { formatBytes } from "./components/ProgressRow";
 import { messageForError, translatorFor, type Language } from "../core/platform/i18n";
 import { SettingsStore } from "../core/platform/storage";
 import { buildPairLink, extractCode, parsePairLink } from "../core/handshake/link";
@@ -14,6 +16,8 @@ import { SessionController } from "../core/peer/session-controller";
 import { ConnectionApproval } from "../core/peer/approval";
 import type { VerificationPhrase } from "../core/peer/verify-phrase";
 import { ConnectionStateMachine, type ConnectionState } from "../core/peer/state-machine";
+import { useTransfer } from "./use-transfer";
+import type { ChannelLike } from "../core/transfer/channel";
 import type { ErrorCode } from "../core/errors";
 
 /**
@@ -61,6 +65,7 @@ export function App({ settings, baseUrl }: AppProps = {}) {
   const [copied, setCopied] = useState("");
   const [scanOpen, setScanOpen] = useState(false);
   const [phrase, setPhrase] = useState<VerificationPhrase | null>(null);
+  const [channel, setChannel] = useState<ChannelLike | null>(null);
   const [approvalOpen, setApprovalOpen] = useState(false);
   const [approved, setApproved] = useState(false);
   const assembler = useRef(new FrameAssembler());
@@ -109,6 +114,19 @@ export function App({ settings, baseUrl }: AppProps = {}) {
     return machine.subscribe((snap) => setScreen(snap.state));
   }, [machine]);
 
+  /**
+   * The transfer engine, bound to the open channel. It is created here rather
+   * than in the connected screen so it is disposed the moment the channel goes
+   * away, and so both sides run identical code whatever their role (PRD 8.4).
+   */
+  const transfer = useTransfer({
+    channel,
+    deviceName: pref.deviceName,
+    autoAccept: pref.autoAccept,
+    // Odd fids for the offerer, even for the answerer (PRD 8.4).
+    fidParity: side === "host" ? 1 : 0,
+  });
+
   // PRD 9.3: the man-in-the-middle check. Derived from the two DTLS
   // fingerprints once the channel is open, so it is available on both sides.
   useEffect(() => {
@@ -151,18 +169,6 @@ export function App({ settings, baseUrl }: AppProps = {}) {
     [machine],
   );
 
-  // FR-3 / FR-6: the offer or answer arrives in the URL fragment, so a shared
-  // link opens the app preloaded (PRD 5.1 step 2).
-  useEffect(() => {
-    const link = typeof location === "undefined" ? null : parsePairLink(location.hash);
-    if (!link) return;
-    if (link.kind === "j") {
-      chooseSide("guest");
-      setOfferCode(link.code);
-      machine.send("join");
-    }
-  }, [machine, chooseSide]);
-
   /** "Try again" (PRD 7.1): clear the reason code, codes and assembly too. */
   const tryAgain = (): void => {
     setError(null);
@@ -171,6 +177,7 @@ export function App({ settings, baseUrl }: AppProps = {}) {
     setAnswerCode("");
     setPeerName("");
     setPhrase(null);
+    setChannel(null);
     setApproved(false);
     setApprovalOpen(false);
     assembler.current.reset();
@@ -188,22 +195,25 @@ export function App({ settings, baseUrl }: AppProps = {}) {
    * same attempt, so the DTLS fingerprints it collects stay available.
    */
   const beginSession = (role: "host" | "guest"): SessionController => {
-    // A fresh attempt needs a fresh gate: PRD 9.5 approval never carries over.
+    // A fresh attempt needs a fresh gate and a fresh transfer list:
+    // PRD 9.5 approval never carries over.
     approvalRef.current = null;
     setApproved(false);
     setApprovalOpen(false);
     setPhrase(null);
+    setChannel(null);
 
     const session = new PeerSession(
       {
         // The answerer only learns the channel opened via this event, so this
         // is what drives the guest to CONNECTED (PRD 7.1).
-        onChannel: (channel) => {
-          const snap = controllerRef.current?.markConnected(channel);
+        onChannel: (opened) => {
+          const snap = controllerRef.current?.markConnected(opened);
           if (snap) {
             setScreen(snap.state as ConnectionState);
             setPeerName(snap.peerName);
           }
+          setChannel(opened);
         },
         onClosed: () => fail("PEER_LOST"),
       },
@@ -274,6 +284,7 @@ export function App({ settings, baseUrl }: AppProps = {}) {
       setScreen(snap.state as ConnectionState);
       setPeerName(snap.peerName);
       setError(snap.error);
+      setChannel(snap.channel);
     },
     [fail, side, t],
   );
@@ -312,9 +323,12 @@ export function App({ settings, baseUrl }: AppProps = {}) {
    * offer — parking the code in state left the screen parked on the camera
    * view forever, so "Paste" silently did nothing.
    */
-  const pasteOffer = async (): Promise<void> => {
-    const code = await readClipboardCode();
-    if (!code) return;
+  /**
+   * Consume the host's offer and answer it (PRD 5.1 step 2). Shared by the
+   * `#j=` link route and the paste route: parking the code in state without
+   * answering it leaves the guest staring at an empty camera screen.
+   */
+  const joinWithOffer = async (code: string): Promise<void> => {
     setError(null);
     chooseSide("guest");
     const snap = await beginSession("guest").joinWithCode(code);
@@ -323,6 +337,25 @@ export function App({ settings, baseUrl }: AppProps = {}) {
     setPeerName(snap.peerName);
     setError(snap.error);
   };
+
+  const pasteOffer = async (): Promise<void> => {
+    const code = await readClipboardCode();
+    if (!code) return;
+    await joinWithOffer(code);
+  };
+
+  // FR-3 / FR-6: a shared offer link opens the app already paired up.
+  const bootstrapped = useRef(false);
+  useEffect(() => {
+    // Only on mount: a later render must not re-answer the link's offer.
+    if (bootstrapped.current) return;
+    const link = typeof location === "undefined" ? null : parsePairLink(location.hash);
+    if (!link || link.kind !== "j") return;
+    bootstrapped.current = true;
+    void joinWithOffer(link.code);
+    // `joinWithOffer` closes over the current render's values, which is exactly
+    // what a one-shot mount effect wants; `bootstrapped` keeps it one-shot.
+  }, []);
 
   const readClipboardCode = async (): Promise<string | null> => {
     try {
@@ -443,6 +476,35 @@ export function App({ settings, baseUrl }: AppProps = {}) {
                 {approved ? t("connect.allowed") : t("connect.pendingApproval")}
               </p>
             ) : null}
+
+            {/* PRD 9.5: nothing may move until the host allows the peer. The
+                guest is granted on arrival, since it scanned a specific QR. */}
+            {screen === "CONNECTED" && (side === "guest" || approved) ? (
+              <TransferPanel
+                t={t}
+                files={transfer.files}
+                saved={transfer.saved}
+                notes={transfer.notes}
+                onSendFiles={(picked) => void transfer.sendFiles(picked)}
+                onSendText={(body) => {
+                  transfer.sendText(body);
+                }}
+                onCancel={transfer.cancel}
+                onDismissNote={transfer.dismissNote}
+              />
+            ) : null}
+          </section>
+        ) : null}
+
+        {/* The machine reaches SHOWING_ANSWER a tick before the answer code is
+            encoded, so show the same preparing state the offer screen uses
+            rather than a blank main region. */}
+        {screen === "SHOWING_ANSWER" && !answerPlan ? (
+          <section class="screen screen-reply">
+            <h1>{t("connect.title")}</h1>
+            <p class="measure" role="status">
+              {t("pair.preparing")}
+            </p>
           </section>
         ) : null}
 
@@ -478,6 +540,25 @@ export function App({ settings, baseUrl }: AppProps = {}) {
         declineLabel={t("action.decline")}
         onAccept={() => setScanOpen(false)}
         onDecline={() => setScanOpen(false)}
+      />
+
+      {/* FR-13: an incoming offer waits for an explicit decision, and the files
+          it lists are already visible as queued rows behind the prompt. */}
+      <Prompt
+        open={transfer.offer !== null}
+        title={t("transfer.incomingTitle", { name: peerName || t("connect.unknownPeer") })}
+        body={
+          <p>
+            {t("transfer.incomingBody", {
+              count: transfer.offer?.files.length ?? 0,
+              size: formatBytes(transfer.offer?.totalSize ?? 0),
+            })}
+          </p>
+        }
+        acceptLabel={t("action.accept")}
+        declineLabel={t("action.decline")}
+        onAccept={() => void transfer.acceptOffer()}
+        onDecline={transfer.declineOffer}
       />
 
       {/* PRD 9.5: the host's approval gate. Declining tears the session down

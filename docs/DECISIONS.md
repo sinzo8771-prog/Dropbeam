@@ -267,3 +267,61 @@ library's docs gets an entry here (PRD section 0.3).
   [`index.html`](../index.html) and [`vite.config.ts`](../vite.config.ts).
 - **Reason:** Clickjacking protection has to be served as a header by the host.
   Keeping a directive that is provably ignored only produces false assurance.
+
+## 2026-10-05 · The transfer engine lives in a hook, not in the screen (M5 follow-up)
+
+- **Problem:** `TransferSession` was complete and tested but nothing ever
+  constructed it: the app could pair and then had no way to send a byte. The
+  natural place — building it inside the Connected screen — would tie its
+  lifetime to a component that renders conditionally on approval, so switching
+  sides mid-session could leave two sessions bound to one channel.
+- **Choice:** `useTransfer` in [`src/ui/use-transfer.ts`](../src/ui/use-transfer.ts) owns
+  one `TransferSession` per open channel, creating it in an effect and disposing
+  it in the effect's cleanup. `TransferPanel` is presentational: it renders what
+  the hook returns and calls back for actions, never touching the channel.
+- **Reason:** Ownership in one place means the session dies exactly when the
+  channel does, and the component stays testable with plain props. The App test
+  asserts the wire really carries `hello` after connecting, so "mounted" means
+  the protocol is live, not just that a component painted.
+
+## 2026-10-05 · The host's approval gates the host; the guest is granted on arrival (M6, applied in the transfer screen)
+
+- **Problem:** PRD 9.5 says transfers are blocked until the host allows the peer
+  and that "both sides see state", but the protocol has no message telling the
+  guest that approval was granted. A literal reading leaves the guest blocked
+  forever with no way to learn it may proceed.
+- **Choice:** The host's transfer controls stay hidden until it presses Allow.
+  The guest is granted on arrival, because it scanned one specific QR code and
+  that scan was the consent. Both sides still see the approval state on screen.
+- **Reason:** The threat PRD 9.4 describes is a stranger who saw the QR and
+  connected _to the host_; the host is the one who needs a second look. Making
+  the guest wait on an absent signal would strand it in a dead UI. If a future
+  milestone wants true two-sided approval, it should add an explicit control
+  frame rather than infer consent from silence.
+
+## 2026-10-05 · A shared offer link must answer the offer, not park it (found by two browser tabs)
+
+- **Problem:** Verified in a real browser with two tabs: opening a `#j=` link
+  landed the guest on `SCANNING_OFFER` forever. The link effect did `setOfferCode`
+  and `machine.send("join")` and nothing else, so the offer was stored in state
+  that no screen rendered and no code consumed — the single most likely way to
+  use the app was a dead end. This is the same shape as the `pasteOffer` defect
+  fixed in M6, in a second copy of the same code.
+- **Choice:** Both routes now go through one `joinWithOffer(code)` that decodes
+  and answers, called from a one-shot mount effect (guarded by a ref) and from
+  the paste button.
+- **Reason:** Two copies of "take an offer" is one too many. Collapsing them means
+  the next change to one cannot silently skip the other, and the regression test
+  asserts the link route reaches a real `DB1.` answer code.
+
+## 2026-10-05 · The answer screen shows a preparing state too
+
+- **Problem:** The machine reaches `SHOWING_ANSWER` one tick before the answer
+  code finishes encoding, and the reply screen was gated on `answerPlan`, so
+  `<main>` rendered empty for that tick — the same blank-screen class already
+  fixed for `SHOWING_OFFER`.
+- **Choice:** Render the existing "Preparing a code…" status whenever the screen
+  is `SHOWING_ANSWER` and no plan exists yet.
+- **Reason:** A state in the PRD state machine must always have a screen. The
+  empty `<main>` was only visible as a flash, which is exactly the kind of defect
+  a screenshot review misses and a DOM assertion catches.

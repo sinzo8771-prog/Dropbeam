@@ -679,6 +679,79 @@ dialog.sheet {
 }
 
 /* Alerts carry a reason code + "Try again" (PRD 12) */
+/* Transfer screen (PRD 10.1 screen 6). The drop zone is a dashed target that
+   only lights up on drag, so a resting page does not shout. */
+.transfer {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-4);
+  width: 100%;
+}
+
+.dropzone {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--s-3);
+  padding: var(--s-6) var(--s-4);
+  border: 2px dashed var(--border-strong);
+  border-radius: var(--r-lg);
+  background: var(--panel);
+}
+
+.dropzone.is-dragging {
+  border-style: solid;
+  border-color: var(--accent);
+}
+
+.dropzone-label {
+  color: var(--ink-muted);
+  font-size: var(--fs-sm);
+  margin: 0;
+}
+
+.rows {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-2);
+}
+
+.note {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-2);
+  align-items: flex-start;
+}
+
+.note-label {
+  color: var(--ink-muted);
+  font-size: var(--fs-xs);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.note-body {
+  width: 100%;
+  padding: var(--s-3);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--r-sm);
+  background: var(--panel);
+  color: var(--ink);
+  font: inherit;
+  resize: vertical;
+}
+
+.note-body-text {
+  margin: 0;
+  color: var(--ink);
+  /* Long notes wrap instead of stretching the row. */
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
 .alert {
   display: flex;
   flex-direction: column;

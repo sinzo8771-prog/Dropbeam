@@ -23,29 +23,40 @@ afterEach(cleanup);
  * Minimal data-channel-only SDP (PRD 8.2.1 template) used to drive the host
  * flow without a real WebRTC stack. The fingerprint must be sha-256 (32 bytes,
  * colon-hex) or handshake validation rejects the description.
+ *
+ * Built from parts rather than pasted, because an answer must differ from the
+ * offer in DTLS role, ICE credentials, fingerprint and candidate address — a
+ * stub that echoes the offer back produces a handshake that cannot be decoded.
  */
-const SHA256_FINGERPRINT_HEX = Array.from(new Uint8Array(32).fill(0xab), (b) =>
-  b.toString(16).padStart(2, "0").toUpperCase(),
-).join(":");
+const CRLF = String.fromCharCode(13, 10);
 
-const OFFER_SDP = [
-  "v=0",
-  "o=- 1 2 IN IP4 127.0.0.1",
-  "s=-",
-  "t=0 0",
-  "a=group:BUNDLE 0",
-  "m=application 9 UDP/DTLS/SCTP webrtc-datachannel",
-  "c=IN IP4 0.0.0.0",
-  "a=mid:0",
-  "a=sctp-port:5000",
-  "a=max-message-size:262144",
-  "a=ice-ufrag:Zx9Qk",
-  "a=ice-pwd:p4ssw0rdBASE64abcDEF123",
-  `a=fingerprint:sha-256 ${SHA256_FINGERPRINT_HEX}`,
-  "a=setup:actpass",
-  "a=candidate:1 1 udp 2122260223 192.168.1.7 54321 typ host",
-  "a=end-of-candidates",
-].join("\r\n");
+function sdpFor(role: "offer" | "answer", identity: number): string {
+  const fp = Array.from(new Uint8Array(32).fill(identity), (b) =>
+    b.toString(16).padStart(2, "0").toUpperCase(),
+  ).join(":");
+  return [
+    "v=0",
+    `o=- 1 ${identity} IN IP4 127.0.0.1`,
+    "s=-",
+    "t=0 0",
+    "a=group:BUNDLE 0",
+    "m=application 9 UDP/DTLS/SCTP webrtc-datachannel",
+    "c=IN IP4 0.0.0.0",
+    "a=mid:0",
+    "a=sctp-port:5000",
+    "a=max-message-size:262144",
+    `a=ice-ufrag:Ufrag${identity}`,
+    `a=ice-pwd:P4ssw0rdBASE64abcDEF12${identity}`,
+    `a=fingerprint:sha-256 ${fp}`,
+    // The offerer may be either role; the answerer must be active.
+    role === "offer" ? "a=setup:actpass" : "a=setup:active",
+    `a=candidate:1 1 udp 2122260223 192.168.1.${identity} ${54320 + identity} typ host`,
+    "a=end-of-candidates",
+  ].join(CRLF);
+}
+
+const OFFER_SDP = sdpFor("offer", 7);
+const ANSWER_SDP = sdpFor("answer", 9);
 
 /**
  * Isolated settings per test: the real store persists to localStorage, so a
@@ -329,6 +340,16 @@ describe("App (PRD 10.1 screens)", () => {
   });
 });
 
+/** Start a real host session, then unmount it, and return its offer code. */
+async function makeOfferCode(): Promise<string> {
+  render(<App settings={freshSettings()} baseUrl="https://dropbeam.example" />);
+  fireEvent.click(screen.getByText("Start"));
+  await waitFor(() => expect(screen.getByTestId("code-text")).toBeTruthy());
+  const code = (screen.getByTestId("code-text").textContent ?? "").replace(/ /g, "");
+  cleanup();
+  return code;
+}
+
 /**
  * A second real device, used to answer the host's offer with a genuine DB1
  * code (PRD 5.1). Only its transport is faked, so the host really decodes
@@ -380,13 +401,26 @@ async function guestAnswering(offerCode: string, name = "Phone"): Promise<string
  * RTCPeerConnection, so the whole host flow has to be stubbed to exercise the
  * connected screen (PRD 9.3/9.5 wiring).
  */
-function stubWebRtc(): () => void {
+function stubWebRtc(): { sent: string[]; restore: () => void } {
+  // Everything the app writes on the channel, so a test can assert on the
+  // real protocol traffic (e.g. the PRD 8.4 `hello`) rather than just on paint.
+  const sent: string[] = [];
+
   class FakeDataChannel {
-    binaryType = "";
+    label = "dropbeam";
+    binaryType: BinaryType = "arraybuffer";
     readyState = "connecting";
+    bufferedAmount = 0;
+    bufferedAmountLowThreshold = 0;
     private handlers = new Map<string, () => void>();
+    send(data: string | ArrayBuffer | ArrayBufferView) {
+      sent.push(typeof data === "string" ? data : "[binary]");
+    }
     addEventListener(type: string, fn: () => void) {
       this.handlers.set(type, fn);
+    }
+    removeEventListener(type: string) {
+      this.handlers.delete(type);
     }
     close() {
       this.readyState = "closed";
@@ -415,8 +449,13 @@ function stubWebRtc(): () => void {
       async createOffer() {
         return { type: "offer", sdp: OFFER_SDP };
       }
-      async setLocalDescription() {
-        this.localDescription = { type: "offer", sdp: OFFER_SDP };
+      async createAnswer() {
+        return { type: "answer", sdp: ANSWER_SDP };
+      }
+      async setLocalDescription(description: RTCSessionDescriptionInit) {
+        // Keep whatever was negotiated; echoing the offer back would make the
+        // guest build an undecodable answer.
+        this.localDescription = description;
       }
       async setRemoteDescription() {
         // The answer is in place; the channel opens on the next tick, as it
@@ -433,8 +472,11 @@ function stubWebRtc(): () => void {
     },
   );
 
-  return () => {
-    vi.unstubAllGlobals();
+  return {
+    sent,
+    restore: () => {
+      vi.unstubAllGlobals();
+    },
   };
 }
 
@@ -446,9 +488,50 @@ function stubClipboard(text: () => string | Promise<string>): void {
   });
 }
 
+describe("App shared offer link (FR-6)", () => {
+  /**
+   * Regression guard: the `#j=` route used to park the offer in state and only
+   * send the machine to SCANNING_OFFER, so a guest who opened a shared link
+   * stared at an empty camera screen forever. It must answer the offer.
+   */
+  it("answers the offer carried in the link fragment", async () => {
+    const rtc = stubWebRtc();
+    const restore = location.hash;
+    try {
+      const offerCode = await makeOfferCode();
+      location.hash = `#j=${offerCode}`;
+      render(<App settings={freshSettings()} baseUrl="https://dropbeam.example" />);
+
+      // Until the answer code is encoded the screen shows the preparing state,
+      // never a blank main region.
+      await waitFor(() => expect(screen.queryByTestId("code-text")).toBeTruthy());
+      expect(document.querySelector("main")?.getAttribute("data-screen")).toBe("SHOWING_ANSWER");
+      const answer = (screen.getByTestId("code-text").textContent ?? "").replace(/ /g, "");
+      expect(answer).toMatch(/^DB1\./);
+      // The peer label from the host's code is carried across (FR-42).
+      expect(answer).not.toBe(offerCode);
+    } finally {
+      location.hash = restore;
+      rtc.restore();
+    }
+  });
+
+  it("ignores an unrelated fragment instead of treating it as an offer", () => {
+    const restore = location.hash;
+    try {
+      location.hash = "#help";
+      render(<App settings={freshSettings()} baseUrl="https://dropbeam.example" />);
+      // A non-Dropbeam anchor must not drag the app into the guest flow.
+      expect(document.querySelector("main")?.getAttribute("data-screen")).toBe("IDLE");
+    } finally {
+      location.hash = restore;
+    }
+  });
+});
+
 describe("App connected screen (PRD 9.3, 9.5)", () => {
   it("shows the host approval prompt and the verification phrase once connected", async () => {
-    const restore = stubWebRtc();
+    const rtc = stubWebRtc();
     try {
       render(<App settings={freshSettings()} baseUrl="https://dropbeam.example" />);
       fireEvent.click(screen.getByText("Start"));
@@ -491,12 +574,45 @@ describe("App connected screen (PRD 9.3, 9.5)", () => {
       );
       expect(dialog.open).toBe(false);
     } finally {
-      restore();
+      rtc.restore();
+    }
+  });
+
+  it("hides the transfer controls until the host allows the peer (PRD 9.5)", async () => {
+    const rtc = stubWebRtc();
+    try {
+      render(<App settings={freshSettings()} baseUrl="https://dropbeam.example" />);
+      fireEvent.click(screen.getByText("Start"));
+      await waitFor(() => expect(screen.getByTestId("code-text")).toBeTruthy());
+      const offerCode = (screen.getByTestId("code-text").textContent ?? "").replace(/ /g, "");
+
+      let answerCode = "";
+      stubClipboard(async () => {
+        answerCode = answerCode || (await guestAnswering(offerCode));
+        return answerCode;
+      });
+      fireEvent.click(screen.getByRole("button", { name: "Paste reply" }));
+      const prompt = await screen.findByText("Allow connection from Phone?");
+      const dialog = prompt.closest("dialog") as HTMLDialogElement;
+      await waitFor(() => expect(dialog.open).toBe(true));
+
+      // Connected, but not allowed yet: nothing may be sent or received.
+      expect(document.querySelector(".transfer")).toBeNull();
+      expect(screen.queryByRole("button", { name: "Choose files" })).toBeNull();
+
+      fireEvent.click(within(dialog).getByRole("button", { name: "Allow" }));
+      // Allowing is what mounts the transfer screen.
+      await waitFor(() => expect(document.querySelector(".transfer")).not.toBeNull());
+      expect(screen.getByRole("button", { name: "Choose files" })).toBeTruthy();
+      // The engine is live on the channel, not just painted (PRD 8.4 hello).
+      expect(rtc.sent.some((m) => m.includes('"hello"'))).toBe(true);
+    } finally {
+      rtc.restore();
     }
   });
 
   it("declining tears the session down instead of leaving it half-open", async () => {
-    const restore = stubWebRtc();
+    const rtc = stubWebRtc();
     try {
       render(<App settings={freshSettings()} baseUrl="https://dropbeam.example" />);
       fireEvent.click(screen.getByText("Start"));
@@ -518,7 +634,7 @@ describe("App connected screen (PRD 9.3, 9.5)", () => {
       expect(screen.getByRole("alert").textContent).toContain("The other device declined.");
       expect(document.querySelector(".verify-card")).toBeNull();
     } finally {
-      restore();
+      rtc.restore();
     }
   });
 });
