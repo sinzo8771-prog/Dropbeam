@@ -120,10 +120,17 @@ function usePwaHealth(): PwaHealth {
   return health;
 }
 
-// The hidden reveal gesture: 8 taps, each within 700 ms of the last,
-// on the right 52 px of the screen. Taps inside the panel itself are
-// ignored so closing it can never re-open it. Module state, because
-// the count must survive the panel mounting and unmounting.
+/** Gap between taps that keeps the reveal count accumulating:
+    a next tap inside the window continues the count, a tap at or
+    past it decays the count to 1. Both boundaries are asserted in
+    tests/unit/debug.test.tsx (699 continues, 700 decays). */
+export const TAP_WINDOW_MS = 700;
+
+// The hidden reveal gesture: 8 taps, each within TAP_WINDOW_MS of
+// the last, on the right 52 px of the screen. Taps inside the panel
+// itself are ignored so closing it can never re-open it. Module
+// state, because the count must survive the panel mounting and
+// unmounting.
 let taps = 0;
 let lastTapAt = 0;
 
@@ -133,7 +140,7 @@ export function DebugGesture({ onOpen }: DebugGestureProps) {
       if (event.target instanceof Element && event.target.closest(".debug-panel")) return;
       if (window.innerWidth - event.clientX > 52) return;
       const now = Date.now();
-      taps = now - lastTapAt < 700 ? taps + 1 : 1;
+      taps = now - lastTapAt < TAP_WINDOW_MS ? taps + 1 : 1;
       lastTapAt = now;
       if (taps >= 8) {
         taps = 0;

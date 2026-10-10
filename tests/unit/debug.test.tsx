@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/preact";
-import { DebugGesture, DebugPanel, type DebugSessionMetrics } from "../../src/ui/debug";
+import { DebugGesture, DebugPanel, TAP_WINDOW_MS, type DebugSessionMetrics } from "../../src/ui/debug";
 import { translatorFor } from "../../src/core/platform/i18n";
 
 afterEach(cleanup);
@@ -229,7 +229,7 @@ function edgeTap(): void {
 describe("DebugGesture (hidden reveal)", () => {
   beforeEach(() => {
     // The tap count is module state that survives unmounting, and it
-    // decays only after 700 ms of real (or faked) time. Start the
+    // decays only after TAP_WINDOW_MS of real (or faked) time. Start the
     // fake clock a safe margin past any timestamp a previous test
     // could have recorded, so no count can leak between tests.
     vi.useFakeTimers();
@@ -283,7 +283,7 @@ describe("DebugGesture (hidden reveal)", () => {
     // never accumulates, so the panel stays hidden.
     for (let i = 0; i < 8; i++) {
       edgeTap();
-      vi.advanceTimersByTime(701);
+      vi.advanceTimersByTime(TAP_WINDOW_MS + 1);
     }
     expect(onOpen).not.toHaveBeenCalled();
   });
@@ -298,7 +298,7 @@ describe("DebugGesture (hidden reveal)", () => {
     // the decay left 2 or more), and the eighth must (a
     // reset-to-zero would still sit at 7 and stay hidden).
     edgeTap();
-    vi.advanceTimersByTime(701);
+    vi.advanceTimersByTime(TAP_WINDOW_MS + 1);
     for (let i = 0; i < 7; i++) edgeTap();
     expect(onOpen).not.toHaveBeenCalled();
     edgeTap();
@@ -314,7 +314,7 @@ describe("DebugGesture (hidden reveal)", () => {
     // overall — five more after it. (A decay here would
     // leave the count at 7 and the panel hidden.)
     edgeTap();
-    vi.advanceTimersByTime(699);
+    vi.advanceTimersByTime(TAP_WINDOW_MS - 1);
     edgeTap();
     for (let i = 0; i < 5; i++) edgeTap();
     expect(onOpen).not.toHaveBeenCalled();
@@ -331,9 +331,32 @@ describe("DebugGesture (hidden reveal)", () => {
     // overall. (Continuing the count here would open the
     // panel on the eighth tap instead.)
     edgeTap();
-    vi.advanceTimersByTime(700);
+    vi.advanceTimersByTime(TAP_WINDOW_MS);
     edgeTap();
     for (let i = 0; i < 6; i++) edgeTap();
+    expect(onOpen).not.toHaveBeenCalled();
+    edgeTap();
+    expect(onOpen).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps the documented window value of 700 ms", () => {
+    // The boundary tests above derive their gaps from the constant,
+    // so pin the documented value itself here: 699 continues and 700
+    // decays only means something while the window is 700 ms.
+    expect(TAP_WINDOW_MS).toBe(700);
+  });
+
+  it("forgets a stale count after a long idle", () => {
+    const onOpen = vi.fn();
+    render(<DebugGesture onOpen={onOpen} />);
+    // Five quick taps, then a minute of silence — far past the
+    // window. The stale count must not leak through the idle: the
+    // first tap back starts over at 1, so the gesture needs eight
+    // from there. Seven rapid taps keep the panel hidden (a stale
+    // count of 5 would have opened it on the third).
+    for (let i = 0; i < 5; i++) edgeTap();
+    vi.advanceTimersByTime(60_000);
+    for (let i = 0; i < 7; i++) edgeTap();
     expect(onOpen).not.toHaveBeenCalled();
     edgeTap();
     expect(onOpen).toHaveBeenCalledTimes(1);
