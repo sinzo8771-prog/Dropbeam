@@ -5,9 +5,21 @@ Codec used per browser pair, plus notes. `DB1` = minimal descriptor (PRD
 
 ## Automated (CI / local)
 
-| Pair                | Route                | Codec | Result  | Date |
-| ------------------- | -------------------- | ----- | ------- | ---- |
-| Chromium ↔ Chromium | loopback (same page) | DB1   | pending |      |
+| Pair                              | Route                                | Codec | Result              | Date       |
+| --------------------------------- | ------------------------------------ | ----- | ------------------- | ---------- |
+| Real DB1 pipeline ↔ same pipeline | same process, WebRTC transport faked | DB1   | pass (`npm run ci`) | 2026-10-10 |
+| Chromium ↔ Chromium (same tab)    | loopback transport, in-app self-test | —     | pass (FR-62)        | 2026-10-10 |
+
+The first row runs the real `DB1` encode/decode and the full session
+pipeline in one process (only the WebRTC transport is faked — see
+`tests/integration/session-pairing.test.ts`). The second row proves the
+transport itself in a real browser: the "Test my connection" self-test
+(`src/core/peer/self-test.ts`) opens two `RTCPeerConnection`s in one tab
+and completes a data-channel round trip.
+
+> **Manual matrix status (2026-10-10): not yet run.** It needs physical
+> devices on real networks; it is the remaining gate before `v1.0` (PRD
+> M8). Fill the Result/Notes cells as each pair is tested.
 
 ## Manual (fill during M8)
 
