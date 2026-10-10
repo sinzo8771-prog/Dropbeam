@@ -31,9 +31,11 @@ try {
   process.exit(1);
 }
 
-// Lazy chunks (scanner, QR render, hash worker) are excluded from the
-// initial budget per PRD NFR-1; they are still reported.
-const isLazy = (name) => /scan|jsqr|qr|worker|hash|frame/i.test(name);
+// Lazy chunks are excluded from the initial budget per PRD NFR-1 — each is
+// a dynamic import the first paint never needs (scanner, QR render, hash
+// worker, the settings sheet, the fflate fallback) — but they are still
+// reported below so the total shipped weight stays visible.
+const isLazy = (name) => /scan|jsqr|qr|worker|hash|frame|settings|fflate-fallback/i.test(name);
 // Some chunks (e.g. the hand-written service worker) are not gzipped; fall
 // back to the raw size so a missing gzip stream cannot mask the budget.
 const gzSize = (file) => {

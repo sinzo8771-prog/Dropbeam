@@ -18,15 +18,28 @@ const outDir = path.join(root, "src", "ui", "fonts");
 const UA =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36";
 
+/**
+ * Families to fetch, with the subset each one ships. Google serves every
+ * family as several subset blocks (latin, latin-ext, cyrillic, …); the
+ * default keeps the latin block, which is right for the Latin families —
+ * but for a script family like Devanagari the latin block would ship
+ * Latin glyphs under a Devanagari name, and `unicode-range` would keep
+ * the browser from ever using it for Hindi text. Script families
+ * declare their own block instead (PRD 10.2 typography, DoD 12).
+ */
 const FAMILIES = [
   { id: "fraunces", query: "Fraunces:opsz,wght@9..144,600..700" },
   { id: "instrument-sans", query: "Instrument+Sans:wght@400;500;600" },
   { id: "jetbrains-mono", query: "JetBrains+Mono:wght@400;500;600" },
-  { id: "noto-sans-devanagari", query: "Noto+Sans+Devanagari:wght@400;600" },
+  {
+    id: "noto-sans-devanagari",
+    query: "Noto+Sans+Devanagari:wght@400;600",
+    keep: /unicode-range:\s*U\+0900-097F/i,
+  },
 ];
 
 /** Keep only the latin (+ latin-ext) subsets so files stay small. */
-const KEEP = /unicode-range:\s*U\+0000-00FF/i;
+const KEEP_LATIN = /unicode-range:\s*U\+0000-00FF/i;
 
 async function fetchText(url) {
   const res = await fetch(url, { headers: { "User-Agent": UA } });
@@ -50,7 +63,7 @@ for (const family of FAMILIES) {
   const cssText = await fetchText(url);
   const blocks = cssText.split("@font-face").slice(1);
   for (const block of blocks) {
-    if (!KEEP.test(block)) continue; // skip cyrillic/vietnamese/... subsets
+    if (!(family.keep ?? KEEP_LATIN).test(block)) continue; // skip unwanted subsets
     const srcMatch = block.match(/url\((https:[^)]+\.woff2)\)/);
     const rangeMatch = block.match(/unicode-range:\s*([^;]+);/);
     const weightMatch = block.match(/font-weight:\s*([^;]+);/);

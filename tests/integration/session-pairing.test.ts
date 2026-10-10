@@ -5,7 +5,7 @@ import {
   type SessionControllerOptions,
 } from "../../src/core/peer/session-controller";
 import { buildSdp } from "../../src/core/handshake/sdp-template";
-import type { Handshake } from "../../src/core/handshake/codec-db1";
+import { HANDSHAKE_TTL_SECONDS, type Handshake } from "../../src/core/handshake/codec-db1";
 import { toBase64Url } from "../../src/core/handshake/encoding";
 import { MemoryChannel } from "../helpers/memory-channel";
 import type { ChannelLike } from "../../src/core/transfer/channel";
@@ -154,6 +154,17 @@ describe("session pairing, host ↔ guest (PRD 5.1, 13.3)", () => {
     expect(stale.code).toMatch(/^DB1\./);
     const snap = await guest.controller.joinWithCode(stale.code);
     expect(snap.error).toBe("CODE_EXPIRED");
+  });
+
+  it("carries the code's expiry in the snapshot so the pairing screen can count it down", async () => {
+    const { controller } = makeController("host");
+    const snap = await controller.startHosting();
+    // FR-7: the TTL is 10 minutes from the handshake `ts`, which the fake
+    // transport stamps at NOW.
+    expect(snap.codeExpiresAt).toBe(NOW + HANDSHAKE_TTL_SECONDS);
+    // A fresh attempt has nothing to count down.
+    controller.reset();
+    expect(controller.snapshot().codeExpiresAt).toBeNull();
   });
 
   it("keeps accepting a code right at the TTL + skew boundary", async () => {

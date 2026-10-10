@@ -9,9 +9,17 @@ import { TransferPanel } from "./components/TransferPanel";
 import { HelpScreen, TroubleshootScreen } from "./help";
 import { SelfTestScreen } from "./selftest";
 import { SendScreen } from "./share";
+import { useWakeLock } from "./use-wake-lock";
+import type { ComponentType } from "preact";
+import type { SettingsSheetProps } from "./settings";
 import { readStagedShare } from "../core/platform/share";
 import { formatBytes } from "./components/ProgressRow";
-import { messageForError, translatorFor, type Language } from "../core/platform/i18n";
+import {
+  messageForError,
+  translatorFor,
+  type Language,
+  type Translate,
+} from "../core/platform/i18n";
 import { SettingsStore } from "../core/platform/storage";
 import { buildPairLink, extractCode, parsePairLink } from "../core/handshake/link";
 import { planQrContent, type QrPlan } from "../core/handshake/qr-render";
@@ -59,6 +67,45 @@ function MultiOrSingleQr({ plan, label }: { plan: QrPlan; label: string }) {
   return <QrTile content={content} label={`${label} (${index + 1}/${plan.frames.length})`} />;
 }
 
+/**
+ * FR-7 countdown on a displayed code. The TTL lives in the codec; showing
+ * it here turns a surprise "code expired" on the other device into a
+ * visible timer. Ticks once a second and stops at zero.
+ */
+export function CodeExpiry({
+  expiresAt,
+  lang,
+  t,
+}: {
+  expiresAt: number | null;
+  lang: Language;
+  t: Translate;
+}) {
+  const [now, setNow] = useState(() => Math.floor(Date.now() / 1000));
+
+  useEffect(() => {
+    const timer = setInterval(() => setNow(Math.floor(Date.now() / 1000)), 1000);
+    return () => clearInterval(timer);
+  }, []);
+
+  if (expiresAt == null) return null;
+  const left = Math.max(0, expiresAt - now);
+  if (left === 0) {
+    return (
+      <p class="hint" role="status">
+        {messageForError("CODE_EXPIRED", lang)}
+      </p>
+    );
+  }
+  const minutes = Math.floor(left / 60);
+  const seconds = String(left % 60).padStart(2, "0");
+  return (
+    <p class="hint" role="status">
+      {`${t("pair.expiresIn")} ${minutes}:${seconds}`}
+    </p>
+  );
+}
+
 export function App({ settings, baseUrl }: AppProps = {}) {
   const store = useMemo(() => settings ?? new SettingsStore(), [settings]);
   const [pref, setPref] = useState(store.current);
@@ -77,6 +124,28 @@ export function App({ settings, baseUrl }: AppProps = {}) {
   /** FR-50: set when the service worker takes over a newer build. */
   const [updateReady, setUpdateReady] = useState(false);
   const [debugOpen, setDebugOpen] = useState(false);
+  /** FR-41: the settings sheet is a layer, like the help pages. */
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  /**
+   * FR-41 / NFR-1: the sheet is fetched the first time it is opened, not
+   * with the app shell — it is not needed for the first paint. Same
+   * treatment as the scanner and the QR renderer.
+   */
+  const [SettingsSheet, setSettingsSheet] = useState<ComponentType<SettingsSheetProps> | null>(
+    null,
+  );
+  useEffect(() => {
+    if (!settingsOpen || SettingsSheet) return;
+    let live = true;
+    void import("./settings").then((mod) => {
+      if (live) setSettingsSheet(() => mod.SettingsSheet);
+    });
+    return () => {
+      live = false;
+    };
+  }, [settingsOpen, SettingsSheet]);
+  /** FR-7: when the displayed code stops being acceptable, or null. */
+  const [codeExpiresAt, setCodeExpiresAt] = useState<number | null>(null);
   /** FR-60/61/62 and FR-51: app pages layered over the connection screens. */
   const [page, setPage] = useState<"main" | "help" | "trouble" | "selftest" | "send">("main");
   /** FR-51: files staged by the share target, waiting for a connection. */
@@ -146,6 +215,26 @@ export function App({ settings, baseUrl }: AppProps = {}) {
   );
 
   useEffect(() => store.subscribe(setPref), [store]);
+
+  // FR-41: the stored preferences are applied to the document by the shell —
+  // tokens.css reads `[data-theme]`, the Devanagari font stack keys off
+  // `lang`, and reduce-motion mirrors the media-query override. "system"
+  // removes the attribute so the OS preference stays in charge.
+  useEffect(() => {
+    const root = document.documentElement;
+    if (pref.theme === "system") root.removeAttribute("data-theme");
+    else root.dataset.theme = pref.theme;
+  }, [pref.theme]);
+
+  useEffect(() => {
+    document.documentElement.lang = pref.language;
+  }, [pref.language]);
+
+  useEffect(() => {
+    const root = document.documentElement;
+    if (pref.reduceMotion) root.dataset.reduceMotion = "true";
+    else root.removeAttribute("data-reduce-motion");
+  }, [pref.reduceMotion]);
   useEffect(
     () => () => {
       // Never leave a peer connection or camera running on unmount.
@@ -171,6 +260,11 @@ export function App({ settings, baseUrl }: AppProps = {}) {
     // Odd fids for the offerer, even for the answerer (PRD 8.4).
     fidParity: side === "host" ? 1 : 0,
   });
+
+  // A transfer keeps the screen awake (FR-41 "keep screen awake"): a phone
+  // that locks mid-transfer can suspend the tab, so hold the wake lock only
+  // while files are actually moving, and only when the user asked for it.
+  useWakeLock(pref.wakeLock && transfer.files.some((file) => !isTerminalPhase(file.phase)));
 
   // FR-50 debug panel: session metrics the shell already knows,
   // recomputed when any source changes. The PWA-side health
@@ -253,6 +347,7 @@ export function App({ settings, baseUrl }: AppProps = {}) {
     setToast("");
     setOfferCode("");
     setAnswerCode("");
+    setCodeExpiresAt(null);
     setPeerName("");
     setPhrase(null);
     setChannel(null);
@@ -321,6 +416,7 @@ export function App({ settings, baseUrl }: AppProps = {}) {
     const snap = await beginSession("host").startHosting();
     setScreen(snap.state as ConnectionState);
     setOfferCode(snap.code);
+    setCodeExpiresAt(snap.codeExpiresAt);
     setPeerName(snap.peerName);
     setError(snap.error);
   };
@@ -348,6 +444,7 @@ export function App({ settings, baseUrl }: AppProps = {}) {
         const snap = await beginSession("guest").joinWithCode(event.code);
         setScreen(snap.state as ConnectionState);
         setAnswerCode(snap.code);
+        setCodeExpiresAt(snap.codeExpiresAt);
         setPeerName(snap.peerName);
         setError(snap.error);
         return;
@@ -412,6 +509,7 @@ export function App({ settings, baseUrl }: AppProps = {}) {
     const snap = await beginSession("guest").joinWithCode(code);
     setScreen(snap.state as ConnectionState);
     setAnswerCode(snap.code);
+    setCodeExpiresAt(snap.codeExpiresAt);
     setPeerName(snap.peerName);
     setError(snap.error);
   };
@@ -469,14 +567,24 @@ export function App({ settings, baseUrl }: AppProps = {}) {
   // FR-3 / FR-6: a shared offer link opens the app already paired up.
   const bootstrapped = useRef(false);
   useEffect(() => {
-    // Only on mount: a later render must not re-answer the link's offer.
-    if (bootstrapped.current) return;
-    const link = typeof location === "undefined" ? null : parsePairLink(location.hash);
-    if (!link || link.kind !== "j") return;
-    bootstrapped.current = true;
-    void joinWithOffer(link.code);
-    // `joinWithOffer` closes over the current render's values, which is exactly
-    // what a one-shot mount effect wants; `bootstrapped` keeps it one-shot.
+    const consumeLink = (): void => {
+      // Exactly once per app lifetime: a later render must not re-answer
+      // the same offer.
+      if (bootstrapped.current) return;
+      const link = typeof location === "undefined" ? null : parsePairLink(location.hash);
+      if (!link || link.kind !== "j") return;
+      bootstrapped.current = true;
+      void joinWithOffer(link.code);
+    };
+    consumeLink();
+    // The link is usually the app's first load, but it can also arrive as an
+    // in-tab fragment change (pasted into the address bar while the app is
+    // open), which fires no load event — without this the home screen just
+    // sits there.
+    window.addEventListener("hashchange", consumeLink);
+    return () => window.removeEventListener("hashchange", consumeLink);
+    // `joinWithOffer` closes over the current render's values, which is what
+    // a one-shot link bootstrap wants; `bootstrapped` keeps it one-shot.
   }, []);
 
   const readClipboardCode = async (): Promise<string | null> => {
@@ -530,6 +638,30 @@ export function App({ settings, baseUrl }: AppProps = {}) {
                   <button type="button" class="btn btn-ghost" onClick={() => setPage("selftest")}>
                     {t("nav.selfTest")}
                   </button>
+                  {/* PRD 10.1 #1: settings icon beside the quiet links. Gear = a
+                      circle with spokes, stroked in currentColor to stay flat. */}
+                  <button
+                    type="button"
+                    class="icon-btn"
+                    aria-label={t("nav.settings")}
+                    title={t("nav.settings")}
+                    onClick={() => setSettingsOpen(true)}
+                  >
+                    <svg
+                      viewBox="0 0 24 24"
+                      width="22"
+                      height="22"
+                      fill="none"
+                      stroke="currentColor"
+                      stroke-width="1.8"
+                      stroke-linecap="round"
+                      aria-hidden="true"
+                      focusable="false"
+                    >
+                      <circle cx="12" cy="12" r="3.2" />
+                      <path d="M12 2.8v2.4M12 18.8v2.4M21.2 12h-2.4M5.2 12H2.8M18.5 5.5l-1.7 1.7M7.2 16.8l-1.7 1.7M18.5 18.5l-1.7-1.7M7.2 7.2 5.5 5.5" />
+                    </svg>
+                  </button>
                 </div>
               </section>
             ) : null}
@@ -556,6 +688,7 @@ export function App({ settings, baseUrl }: AppProps = {}) {
                   </p>
                 )}
                 <p class="measure">{t("pair.waitingReply")}</p>
+                <CodeExpiry expiresAt={codeExpiresAt} lang={lang} t={t} />
                 <p class="hint">{t("pair.noWebcam")}</p>
                 <div class="row-actions">
                   <button type="button" class="btn btn-secondary" onClick={() => setScanOpen(true)}>
@@ -655,6 +788,7 @@ export function App({ settings, baseUrl }: AppProps = {}) {
                   copiedLabel={t("action.copied")}
                   onCopy={copy}
                 />
+                <CodeExpiry expiresAt={codeExpiresAt} lang={lang} t={t} />
               </section>
             ) : null}
 
@@ -728,6 +862,20 @@ export function App({ settings, baseUrl }: AppProps = {}) {
             {t("update.reload")}
           </button>
         </div>
+      ) : null}
+
+      {/* FR-41: the settings sheet. Theme, language, auto-accept, STUN,
+          wake lock, reduce motion and the device label — all persisted
+          through the allowlisted keys in storage.ts (FR-40). Loaded on
+          first open, so it stays out of the initial bundle (NFR-1). */}
+      {settingsOpen && SettingsSheet ? (
+        <SettingsSheet
+          open
+          settings={pref}
+          t={t}
+          onChange={(patch) => store.update(patch)}
+          onClose={() => setSettingsOpen(false)}
+        />
       ) : null}
 
       {/* FR-50 debug panel: build id, service worker + cache health,

@@ -49,6 +49,17 @@ export default defineConfig({
     sourcemap: false,
     assetsInlineLimit: 0,
     cssCodeSplit: false,
+    rollupOptions: {
+      output: {
+        /**
+         * Name the fflate fallback chunk explicitly. It is a dynamic
+         * import (encoding.ts only reaches it when the native
+         * CompressionStream is missing), and scripts/size-budget.mjs
+         * recognises lazy chunks by name.
+         */
+        manualChunks: (id) => (id.includes("node_modules/fflate") ? "fflate-fallback" : undefined),
+      },
+    },
   },
   worker: {
     format: "es",

@@ -18,10 +18,13 @@
   --warning: #8a5a00;
   --danger: #b3261e;
 
-  /* type */
-  --font-display: "Fraunces", Georgia, serif;
-  --font-ui: "Instrument Sans", system-ui, sans-serif;
-  --font-mono: "JetBrains Mono", ui-monospace, monospace;
+  /* type. The family names match the @font-face declarations in
+     fonts.css exactly: CSS family names are case-insensitive, but spaces
+     and hyphens are significant, so "Instrument Sans" would silently
+     fall back to system-ui. */
+  --font-display: "fraunces", Georgia, serif;
+  --font-ui: "instrument-sans", system-ui, sans-serif;
+  --font-mono: "jetbrains-mono", ui-monospace, monospace;
   --fs-xs: 0.8125rem;
   --fs-sm: 0.9375rem;
   --fs-md: 1rem;
@@ -92,6 +95,14 @@
     --t-base: 0ms;
     --t-slow: 0ms;
   }
+}
+
+/* FR-41 "reduce motion" setting: the same override as the media query, but
+   chosen by the user from the settings sheet instead of the OS. */
+:root[data-reduce-motion] {
+  --t-fast: 0ms;
+  --t-base: 0ms;
+  --t-slow: 0ms;
 }
 
 /* QR tile is always black on white, in both themes */

@@ -266,6 +266,21 @@ textarea {
   background: var(--on-accent);
 }
 
+/* The visible "On"/"Off" state text beside a switch (PRD 10.6: state text,
+   never colour alone). A min-width keeps the row from shifting as it flips. */
+.switch-control {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s-3);
+  flex: none;
+}
+
+.switch-state {
+  font-size: var(--fs-xs);
+  color: var(--ink-muted);
+  min-width: 4ch;
+}
+
 /* segmented control (10.6): radio group */
 .segments {
   display: flex;
@@ -889,15 +904,68 @@ dialog.sheet {
   margin-top: var(--s-6);
 }
 
+/* FR-41 settings sheet. Groups divide with margins and hints, never nested
+   cards (PRD 10.2 rule 3); the fieldset keeps radio-group semantics. */
+.settings-title {
+  font-family: var(--font-display);
+  font-size: var(--fs-lg);
+  margin: 0 0 var(--s-4);
+}
+
+.settings-group {
+  border: 0;
+  padding: 0;
+  margin: 0 0 var(--s-6);
+}
+
+.settings-group legend {
+  font-size: var(--fs-sm);
+  font-weight: 500;
+  color: var(--ink-muted);
+  padding: 0;
+  margin-bottom: var(--s-2);
+}
+
+.settings-group .hint {
+  margin-top: var(--s-2);
+}
+
+.settings-field-label {
+  display: block;
+  font-size: var(--fs-sm);
+  font-weight: 500;
+  color: var(--ink-muted);
+  margin-bottom: var(--s-2);
+}
+
+.settings-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: var(--s-2);
+}
+
 .toast {
   font-size: var(--fs-xs);
   color: var(--ink-muted);
 }
 
-/* Hindi renders in Noto Sans Devanagari (PRD 10.2 typography) */
+/* Hindi renders in Noto Sans Devanagari (PRD 10.2 typography, DoD 12).
+   The rule overrides the font *tokens*, so every rule that references
+   var(--font-ui / --font-display / --font-mono) picks the Devanagari face
+   up — including the display and mono faces, which have no Devanagari
+   glyphs of their own. Latin keeps its own face: Instrument Sans and
+   friends still hold the U+0000-00FF subset. Setting font-family on
+   :root instead would lose to body's explicit declaration.
+
+   Every family name here matches the one in fonts.css exactly: CSS family
+   names are case-insensitive, but not space- or hyphen-insensitive —
+   "Noto Sans Devanagari" and "noto-sans-devanagari" are different
+   families, and the mismatch silently falls back to the system font. */
 :root:lang(hi),
 html[lang="hi"] {
-  font-family: "Noto Sans Devanagari", var(--font-ui);
+  --font-ui: "noto-sans-devanagari", "instrument-sans", system-ui, sans-serif;
+  --font-display: "noto-sans-devanagari", "fraunces", Georgia, serif;
+  --font-mono: "noto-sans-devanagari", "jetbrains-mono", ui-monospace, monospace;
 }
 
 /* ------------------------------------------------------------------

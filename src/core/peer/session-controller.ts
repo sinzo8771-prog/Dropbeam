@@ -1,5 +1,5 @@
 import { DropbeamError, type ErrorCode } from "../errors";
-import { encodeDb1, type Handshake } from "../handshake/codec-db1";
+import { encodeDb1, HANDSHAKE_TTL_SECONDS, type Handshake } from "../handshake/codec-db1";
 import { decodeHandshake } from "../handshake/decode";
 import { defaultCompressionImpl, type CompressionImpl } from "../handshake/encoding";
 import { buildPairLink, extractCode, type PairKind } from "../handshake/link";
@@ -33,6 +33,12 @@ export type SessionSnapshot = {
   code: string;
   /** Ready-to-share link; `#j=` for an offer, `#a=` for an answer. */
   link: string;
+  /**
+   * Unix seconds after which a peer rejects this code (FR-7 TTL, carried in
+   * the handshake `ts`). The pairing screen counts it down so the expiry is
+   * visible before the other device discovers it.
+   */
+  codeExpiresAt: number | null;
   /** Peer device label from the decoded code (FR-42), if any. */
   peerName: string;
   channel: ChannelLike | null;
@@ -66,6 +72,7 @@ export class SessionController {
   private readonly machine: ConnectionStateMachine;
   private code = "";
   private link = "";
+  private codeExpiresAt: number | null = null;
   private peerName = "";
   private channel: ChannelLike | null = null;
   private error: ErrorCode | null = null;
@@ -100,6 +107,7 @@ export class SessionController {
       side: this.opts.side,
       code: this.code,
       link: this.link,
+      codeExpiresAt: this.codeExpiresAt,
       peerName: this.peerName,
       channel: this.channel,
       error: this.error,
@@ -244,21 +252,24 @@ export class SessionController {
 
   private async publish(handshake: Handshake, kind: PairKind): Promise<void> {
     // Carry the peer label (FR-42) and the FR-7 expiry timestamp.
+    const created = handshake.ts || this.nowSeconds();
     const enriched: Handshake = {
       ...handshake,
       n: this.opts.deviceName || undefined,
-      ts: handshake.ts || this.nowSeconds(),
+      ts: created,
     };
     this.code = await encodeDb1(enriched, {
       impl: this.opts.impl ?? (await defaultCompressionImpl()),
       nowSeconds: this.nowSeconds(),
     });
+    this.codeExpiresAt = created + HANDSHAKE_TTL_SECONDS;
     this.link = buildPairLink(this.opts.baseUrl, kind, this.code);
   }
 
   private clear(): void {
     this.code = "";
     this.link = "";
+    this.codeExpiresAt = null;
     this.channel = null;
     this.error = null;
     // Fingerprints belong to one attempt; never carry them across sessions.

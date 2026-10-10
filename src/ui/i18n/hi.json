@@ -136,6 +136,8 @@
   "settings.theme.light": "हल्का",
   "settings.theme.dark": "गहरा",
   "settings.language": "भाषा",
+  "settings.language.en": "अंग्रेज़ी",
+  "settings.language.hi": "हिन्दी",
   "settings.autoAccept": "आने वाली फ़ाइलें अपने आप स्वीकार करें",
   "settings.autoAcceptHelp": "एक कदम बचाता है, पर जो कोड स्कैन कर सके वह आपको भेज सकता है।",
   "settings.stun": "अलग नेटवर्क के बीच",
@@ -143,6 +145,9 @@
   "settings.wakeLock": "स्क्रीन जागती रहे",
   "settings.reduceMotion": "गतिशीलता कम करें",
   "settings.deviceName": "उपकरण का नाम",
+  "settings.deviceNameHelp": "पेयरिंग के समय दूसरे उपकरण को दिखता है। कभी सहेजा नहीं जाता।",
+  "settings.state.on": "चालू",
+  "settings.state.off": "बंद",
 
   "err.CAMERA_DENIED": "कैमरा अवरुद्ध है। इसके बजाय कोड पेस्ट करें या सेटिंग में कैमरा अनुमति दें।",
   "err.CODE_INVALID": "यह ड्रॉपबीम कोड नहीं लगता।",

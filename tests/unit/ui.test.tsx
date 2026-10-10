@@ -527,6 +527,37 @@ describe("App shared offer link (FR-6)", () => {
       location.hash = restore;
     }
   });
+
+  /**
+   * Regression guard: an offer link can also arrive as an in-tab fragment
+   * change (pasted into the address bar while the app is already open),
+   * which fires no load event. The home screen used to sit there and do
+   * nothing; now the hashchange route answers the offer.
+   */
+  it("answers an offer link that arrives after the app has loaded", async () => {
+    const rtc = stubWebRtc();
+    const restore = location.hash;
+    try {
+      // The offer is produced first (its own short-lived app instance), so
+      // the app under test starts from a clean home screen.
+      const offerCode = await makeOfferCode();
+      render(<App settings={freshSettings()} baseUrl="https://dropbeam.example" />);
+      expect(document.querySelector("main")?.getAttribute("data-screen")).toBe("IDLE");
+
+      location.hash = `#j=${offerCode}`;
+      // An address-bar paste changes only the fragment: a hashchange, not a
+      // navigation. The app has to notice.
+      window.dispatchEvent(new HashChangeEvent("hashchange"));
+
+      await waitFor(() => expect(screen.queryByTestId("code-text")).toBeTruthy());
+      expect(document.querySelector("main")?.getAttribute("data-screen")).toBe("SHOWING_ANSWER");
+      const answer = (screen.getByTestId("code-text").textContent ?? "").replace(/ /g, "");
+      expect(answer).toMatch(/^DB1\./);
+    } finally {
+      location.hash = restore;
+      rtc.restore();
+    }
+  });
 });
 
 describe("App connected screen (PRD 9.3, 9.5)", () => {

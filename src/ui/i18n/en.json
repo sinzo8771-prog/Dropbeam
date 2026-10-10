@@ -136,6 +136,8 @@
   "settings.theme.light": "Light",
   "settings.theme.dark": "Dark",
   "settings.language": "Language",
+  "settings.language.en": "English",
+  "settings.language.hi": "हिन्दी",
   "settings.autoAccept": "Auto-accept incoming files",
   "settings.autoAcceptHelp": "Saves a step, but anyone who can scan your code can send to you.",
   "settings.stun": "Across networks",
@@ -143,6 +145,9 @@
   "settings.wakeLock": "Keep screen awake",
   "settings.reduceMotion": "Reduce motion",
   "settings.deviceName": "Device name",
+  "settings.deviceNameHelp": "Shown to the other device while pairing. Never stored.",
+  "settings.state.on": "On",
+  "settings.state.off": "Off",
 
   "err.CAMERA_DENIED": "Camera blocked. Paste the code instead or allow camera in settings.",
   "err.CODE_INVALID": "That doesn't look like a Dropbeam code.",

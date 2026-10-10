@@ -443,3 +443,59 @@ library's docs gets an entry here (PRD section 0.3).
   The manifest now carries a single fallback string and the PWA category is
   pinned to 100 by the run above; `tests/unit/pwa.test.ts` asserts the
   string form so the array cannot come back.
+
+---
+
+## 2026-10-10 — FR-41 settings sheet closed, plus two latent font bugs
+
+- **Problem:** The M7 polish pass flagged one pre-existing gap: FR-41's
+  settings sheet had no UI — the `SettingsStore`, the allowlisted keys
+  (FR-40) and both catalogs' strings existed, but nothing emitted or
+  applied them. While building the sheet, two silent font defects surfaced:
+  (1) `scripts/fetch-fonts.mjs` kept the _latin_ subset for every family, so
+  the shipped "Devanagari" woff2 held Latin glyphs and its
+  `unicode-range` never matched Hindi text; (2) `base.css` referenced that
+  face as `"Noto Sans Devanagari"` while fonts.css declares
+  `"noto-sans-devanagari"` — CSS family names are case-insensitive but not
+  space/hyphen-insensitive, so the face never loaded and Hindi rendered in
+  a system fallback. The same mismatch made `"Instrument Sans"` /
+  `"JetBrains Mono"` miss their declared names, i.e. the whole UI was
+  rendering body text in `system-ui`.
+- **Choice:**
+  - `src/ui/settings.tsx`: a native `<dialog>` bottom sheet with radio
+    segment groups (theme, language — real `<input type="radio">`) and
+    `role="switch"` checkboxes with visible "On/Off" state text
+    (PRD 10.6), the FR-42 device label (capped at 64 chars, never
+    persisted), and the wake-lock row feature-detected so no dead switch
+    appears where the API is missing.
+  - The sheet is a **dynamic import** (like the scanner and QR renderer):
+    it is not part of the first paint, and NFR-1 budgets only what is.
+  - The app shell applies `data-theme` / `lang` / `data-reduce-motion` to
+    the document from the store, so tokens.css and the Devanagari stack
+    react to it; `use-wake-lock.ts` holds a screen lock only while files
+    are moving (re-taking it on visibility, best-effort, never fatal).
+  - FR-7's TTL is now visible: `SessionSnapshot` carries `codeExpiresAt`,
+    and the pairing screens count it down instead of letting the _other_
+    device discover the expiry first.
+  - `fonts.css` keeps each family's own subset (Devanagari keeps
+    `U+0900-097F`), and every stack in base/tokens references the declared
+    family names verbatim. `tests/unit/fonts.test.ts` pins both.
+  - The offered answer link that arrives as an in-tab fragment change
+    (`hashchange`, not a load) is now answered too — the same one-shot
+    bootstrap path, so a link pasted into the address bar of an open tab
+    no longer leaves the home screen sitting there.
+  - `fflate` (the DEFLATE fallback for browsers without
+    `CompressionStream`) became a dynamic import and a named
+    `fflate-fallback` chunk. Native streams cover every browser at launch
+    (PRD 8.1 prefers them), so the fallback no longer costs first paint.
+- **Reason:** These were stored-but-dead features and silent-wrong fonts —
+  the exact "clipped/blank UI" class DoD 12 guards against. Lazy-loading
+  the sheet and the fallback compressor also moved initial JS from
+  152.7 KB to 147.0 KB gz against the 153.6 KB budget, so the feature
+  landed with more headroom than it found.
+- **Also:** the M7 polish note is now closed by
+  `tests/e2e/settings.spec.ts` + `tests/e2e/pairing-transfer.spec.ts` (two
+  real browser contexts pair over loopback WebRTC, exchange a file and a
+  note, and assert zero console errors), and the settings flow is covered
+  end-to-end including persistence across reload (FR-40 key list asserted
+  from `localStorage`).

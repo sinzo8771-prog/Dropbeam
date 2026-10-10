@@ -3,6 +3,8 @@
 Send files straight between your devices, over a direct connection. Nothing is
 uploaded — no account, no server, no third-party request.
 
+![Two browsers pairing and transferring a file](docs/demo.gif)
+
 Both devices open the same static page and pair with a QR code, a link, or a
 pasted code. Files and notes then travel directly over a WebRTC data channel on
 your local network, verified with SHA-256 on arrival.
@@ -15,10 +17,11 @@ your local network, verified with SHA-256 on arrival.
 - **Send files and notes:** folders included; per-file progress, speed and ETA;
   cancel any time. Large files are staged through FSA/OPFS so memory stays
   flat.
+- **Settings sheet:** theme (system/light/dark), English or Hindi, auto-accept,
+  "Across networks" (STUN, off by default), keep-screen-awake, reduce motion and
+  an optional device label — nothing but those keys is ever stored.
 - **Installs as a PWA:** offline shell, safe update flow, and a share target on
   Android (shared files wait on a Send screen until a device is paired).
-- **Two languages, two themes:** English and Hindi, light and dark, with the
-  token pairs pinned to WCAG AA contrast by tests.
 - **Help built in:** a "How it works" page, a troubleshooting page, and a
   one-tap connection self-test that runs two peers inside the same tab to prove
   WebRTC works in your browser.
@@ -46,9 +49,9 @@ npm run ci         # typecheck, lint, unit + integration tests, build,
 Individual scripts: `npm run test` (Vitest), `npm run test:e2e` (Playwright),
 `npm run size` (gzip budget), `npm run pwa:health` (installability probe).
 
-Current gate: 239 tests green, initial JS ~152.7 KB gz against a 153.6 KB
-budget, Lighthouse mobile **99 / 100 / 100** (Performance / Accessibility /
-PWA).
+Current gate: 275 tests green (265 unit/integration + 10 e2e), initial JS
+~147.0 KB gz against a 153.6 KB budget, Lighthouse mobile **99 / 100 / 100**
+(Performance / Accessibility / PWA).
 
 ## Using it
 
@@ -72,8 +75,11 @@ the hotspot trick and the browser support table.
 
 ## Status
 
-Milestones M0–M7 are complete and gated by `npm run ci`. Before `v1.0` two
-manual items remain: the physical-device interop matrix
-([docs/INTEROP.md](docs/INTEROP.md)) and the demo recording. A hidden
-diagnostic panel ships for field debugging: tap eight times on the right edge
-of the screen.
+Milestones M0–M7 are complete and gated by `npm run ci`. What remains for
+`v1.0` (M8): the **physical-device interop matrix**
+([docs/INTEROP.md](docs/INTEROP.md)) — the two-browser e2e suite already
+covers pairing, verification, approval, a two-way transfer and the
+peer-drop path against the production build — and tagging the release.
+The demo animation above is recorded by `node scripts/record-demo.mjs`
+(needs a `vite preview` server on :4199). A hidden diagnostic panel ships
+for field debugging: tap eight times on the right edge of the screen.

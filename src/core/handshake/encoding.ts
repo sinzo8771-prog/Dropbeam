@@ -1,14 +1,15 @@
-import { Inflate, deflateSync } from "fflate";
-import { DropbeamError } from "../errors";
-
 /**
  * Wire encoding shared by the DB0/DB1 codecs (PRD 8.2.1): bytes →
  * deflate-raw → base64url, plus strict base64url helpers.
  *
  * Compression uses the native `CompressionStream("deflate-raw")` when the
  * runtime provides it (PRD 8.1) and falls back to the pinned `fflate`
- * package. Tests exercise both implementations, including cross-decoding.
+ * package — loaded on demand, because the native path covers every
+ * browser at launch and NFR-1 budgets the initial bundle. Tests exercise
+ * both implementations, including cross-decoding.
  */
+
+import { DropbeamError } from "../errors";
 
 export type CompressionImpl = "native" | "fflate";
 
@@ -94,6 +95,14 @@ export function defaultCompressionImpl(): CompressionImpl {
   return nativeAvailable() ? "native" : "fflate";
 }
 
+/**
+ * The fallback compressor, fetched only when the native streams are
+ * missing: a dynamic import keeps it out of the initial bundle.
+ */
+async function loadFflate(): Promise<typeof import("fflate")> {
+  return import("fflate");
+}
+
 async function nativeTransform(
   bytes: Uint8Array,
   stream: {
@@ -150,6 +159,7 @@ export async function deflateRaw(
   if (impl === "native") {
     return nativeTransform(bytes, new CompressionStream("deflate-raw"));
   }
+  const { deflateSync } = await loadFflate();
   return deflateSync(bytes, { level: 6 });
 }
 
@@ -171,6 +181,7 @@ async function inflateRawImpl(bytes: Uint8Array, impl: CompressionImpl): Promise
   if (impl === "native") {
     return nativeTransform(bytes, new DecompressionStream("deflate-raw"));
   }
+  const { Inflate } = await loadFflate();
   const chunks: Uint8Array[] = [];
   let total = 0;
   const inflator = new Inflate();
