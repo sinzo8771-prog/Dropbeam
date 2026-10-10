@@ -15,9 +15,7 @@ function pngSize(file: string): { width: number; height: number } {
 }
 
 describe("installable PWA (PRD FR-50)", () => {
-  const manifest = JSON.parse(
-    readFileSync(join(publicDir, "manifest.webmanifest"), "utf8"),
-  );
+  const manifest = JSON.parse(readFileSync(join(publicDir, "manifest.webmanifest"), "utf8"));
 
   it("declares the app with a shell URL", () => {
     expect(manifest.name).toBe("Dropbeam");
@@ -39,6 +37,36 @@ describe("installable PWA (PRD FR-50)", () => {
       expect(height).toBe(declared);
       expect(icon.type).toBe("image/png");
     }
+  });
+
+  it("sets a plain-string theme_color (the media-array form is invalid)", () => {
+    // The per-scheme tinting lives in index.html's <meta name="theme-color">
+    // tags; the manifest value must be a single string or browsers and
+    // Lighthouse treat the manifest as having no theme color at all.
+    expect(manifest.theme_color).toBe("#F6F2EA");
+    expect(manifest.background_color).toBe("#F6F2EA");
+  });
+
+  it("declares a share target that posts files into the app (FR-51)", () => {
+    expect(manifest.share_target).toEqual({
+      action: "./share",
+      method: "POST",
+      enctype: "multipart/form-data",
+      params: { files: [{ name: "files", accept: ["*/*"], multiple: true }] },
+    });
+  });
+
+  it("stages share-target posts in the worker and keeps them across deploys", () => {
+    const sw = readFileSync(join(publicDir, "sw.js"), "utf8");
+    // The POST route is answered by the worker, never the network…
+    expect(sw).toContain('url.pathname.endsWith("/share")');
+    expect(sw).toContain('request.method === "POST"');
+    expect(sw).toContain('form.getAll("files")');
+    // …staged in a dedicated cache, landed on via #shared, and the
+    // activate sweep must spare it (a deploy must not eat a share).
+    expect(sw).toContain('"dropbeam-share"');
+    expect(sw).toContain('"./#shared"');
+    expect(sw).toContain("name !== SHARE_CACHE");
   });
 
   it("ships a service worker whose cache name is version-stamped", () => {

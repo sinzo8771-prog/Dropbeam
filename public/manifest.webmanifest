@@ -7,11 +7,22 @@
   "scope": "./",
   "display": "standalone",
   "orientation": "portrait-primary",
+  "share_target": {
+    "action": "./share",
+    "method": "POST",
+    "enctype": "multipart/form-data",
+    "params": {
+      "files": [
+        {
+          "name": "files",
+          "accept": ["*/*"],
+          "multiple": true
+        }
+      ]
+    }
+  },
   "background_color": "#F6F2EA",
-  "theme_color": [
-    { "media": "(prefers-color-scheme: light)", "color": "#F6F2EA" },
-    { "media": "(prefers-color-scheme: dark)", "color": "#151412" }
-  ],
+  "theme_color": "#F6F2EA",
   "icons": [
     {
       "src": "./icons/icon-192.png",

@@ -6,6 +6,10 @@ import { Prompt } from "./components/Prompt";
 import { QrTile } from "./components/QrTile";
 import { VerifyCard } from "./components/VerifyCard";
 import { TransferPanel } from "./components/TransferPanel";
+import { HelpScreen, TroubleshootScreen } from "./help";
+import { SelfTestScreen } from "./selftest";
+import { SendScreen } from "./share";
+import { readStagedShare } from "../core/platform/share";
 import { formatBytes } from "./components/ProgressRow";
 import { messageForError, translatorFor, type Language } from "../core/platform/i18n";
 import { SettingsStore } from "../core/platform/storage";
@@ -73,11 +77,41 @@ export function App({ settings, baseUrl }: AppProps = {}) {
   /** FR-50: set when the service worker takes over a newer build. */
   const [updateReady, setUpdateReady] = useState(false);
   const [debugOpen, setDebugOpen] = useState(false);
+  /** FR-60/61/62 and FR-51: app pages layered over the connection screens. */
+  const [page, setPage] = useState<"main" | "help" | "trouble" | "selftest" | "send">("main");
+  /** FR-51: files staged by the share target, waiting for a connection. */
+  const [staged, setStaged] = useState<File[]>([]);
+  /** One auto-send attempt per connection: a failure must not loop. */
+  const stagedSentRef = useRef(false);
 
   useEffect(() => {
     const onUpdate = () => setUpdateReady(true);
     window.addEventListener("dropbeam:update", onUpdate);
     return () => window.removeEventListener("dropbeam:update", onUpdate);
+  }, []);
+  // Help pages are reachable from the idle screen only: any real
+  // connection change drops back to the main view (the transfer UI
+  // must never hide behind an informational page).
+  useEffect(() => {
+    setPage("main");
+  }, [screen]);
+  // FR-51: a share-target POST lands the app on #shared with the files
+  // in the staging cache. Pull them in once, clear the hash, then show
+  // the Send screen.
+  useEffect(() => {
+    if (typeof location === "undefined" || location.hash !== "#shared") return;
+    let live = true;
+    void readStagedShare().then((files) => {
+      if (!live) return;
+      history.replaceState(null, "", location.pathname + location.search);
+      if (files.length > 0) {
+        setStaged(files);
+        setPage("send");
+      }
+    });
+    return () => {
+      live = false;
+    };
   }, []);
   const assembler = useRef(new FrameAssembler());
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -185,6 +219,25 @@ export function App({ settings, baseUrl }: AppProps = {}) {
     // `request()` is one-shot, so re-renders never re-prompt.
     gate.request();
   }, [screen, side, peerName, t]);
+
+  // FR-51: staged files go out as soon as the same gate the transfer
+  // panel uses is open (guest: on arrival, host: after approving).
+  // Exactly one attempt per connection — a failure re-stages the files
+  // and says so, rather than retrying forever.
+  useEffect(() => {
+    if (screen !== "CONNECTED") stagedSentRef.current = false;
+  }, [screen]);
+  useEffect(() => {
+    if (staged.length === 0 || screen !== "CONNECTED" || stagedSentRef.current) return;
+    if (!(side === "guest" || approved)) return;
+    stagedSentRef.current = true;
+    const files = staged;
+    setStaged([]);
+    void transfer.sendFiles(files).catch(() => {
+      setStaged((current) => [...files, ...current]);
+      setToast(t("share.sendFailed"));
+    });
+  }, [staged, screen, side, approved, transfer, t]);
 
   const fail = useCallback(
     (code: ErrorCode) => {
@@ -369,6 +422,50 @@ export function App({ settings, baseUrl }: AppProps = {}) {
     await joinWithOffer(code);
   };
 
+  /** The FR-60/61/62/51 page shown instead of the connection screens. */
+  const renderPage = () => {
+    if (page === "help") {
+      return (
+        <HelpScreen
+          t={t}
+          onBack={() => setPage("main")}
+          onTroubleshoot={() => setPage("trouble")}
+        />
+      );
+    }
+    if (page === "trouble") {
+      return <TroubleshootScreen t={t} onBack={() => setPage("help")} />;
+    }
+    if (page === "selftest") {
+      return (
+        <SelfTestScreen
+          t={t}
+          onBack={() => setPage("main")}
+          onTroubleshoot={() => setPage("trouble")}
+        />
+      );
+    }
+    if (page === "send") {
+      return (
+        <SendScreen
+          t={t}
+          staged={staged}
+          onRemove={(file) => setStaged((files) => files.filter((f) => f !== file))}
+          onStart={() => {
+            setPage("main");
+            void start();
+          }}
+          onJoin={() => {
+            setPage("main");
+            join();
+          }}
+          onBack={() => setPage("main")}
+        />
+      );
+    }
+    return null;
+  };
+
   // FR-3 / FR-6: a shared offer link opens the app already paired up.
   const bootstrapped = useRef(false);
   useEffect(() => {
@@ -409,153 +506,168 @@ export function App({ settings, baseUrl }: AppProps = {}) {
       </header>
 
       <main class="stack" data-screen={screen}>
-        {screen === "IDLE" ? (
-          <section class="screen screen-home">
-            <h1>{t("idle.title")}</h1>
-            <p class="measure">{t("idle.lead")}</p>
-            <div class="home-actions">
-              <button type="button" class="btn btn-primary btn-lg" onClick={start}>
-                {t("action.start")}
-              </button>
-              <button type="button" class="btn btn-secondary btn-lg" onClick={join}>
-                {t("action.join")}
-              </button>
-            </div>
-          </section>
-        ) : null}
+        {page !== "main" ? (
+          renderPage()
+        ) : (
+          <>
+            {screen === "IDLE" ? (
+              <section class="screen screen-home">
+                <h1>{t("idle.title")}</h1>
+                <p class="measure">{t("idle.lead")}</p>
+                <div class="home-actions">
+                  <button type="button" class="btn btn-primary btn-lg" onClick={start}>
+                    {t("action.start")}
+                  </button>
+                  <button type="button" class="btn btn-secondary btn-lg" onClick={join}>
+                    {t("action.join")}
+                  </button>
+                </div>
+                {/* PRD 10.2.1: quiet links under the two main actions. */}
+                <div class="home-links">
+                  <button type="button" class="btn btn-ghost" onClick={() => setPage("help")}>
+                    {t("nav.howItWorks")}
+                  </button>
+                  <button type="button" class="btn btn-ghost" onClick={() => setPage("selftest")}>
+                    {t("nav.selfTest")}
+                  </button>
+                </div>
+              </section>
+            ) : null}
 
-        {/* The host shows its offer while waiting; both map to the pairing screen. */}
-        {screen === "WAITING_FOR_REPLY" || screen === "SHOWING_OFFER" ? (
-          <section class="screen screen-pair">
-            <h1>{t("pair.title")}</h1>
-            {offerPlan ? (
-              <>
-                <MultiOrSingleQr plan={offerPlan} label={t("pair.title")} />
+            {/* The host shows its offer while waiting; both map to the pairing screen. */}
+            {screen === "WAITING_FOR_REPLY" || screen === "SHOWING_OFFER" ? (
+              <section class="screen screen-pair">
+                <h1>{t("pair.title")}</h1>
+                {offerPlan ? (
+                  <>
+                    <MultiOrSingleQr plan={offerPlan} label={t("pair.title")} />
+                    <CodeBox
+                      code={offerCode}
+                      label={t("action.copy")}
+                      copyLabel={t("action.copy")}
+                      copiedLabel={t("action.copied")}
+                      onCopy={copy}
+                    />
+                  </>
+                ) : (
+                  // Still gathering ICE (GATHERING): never show an empty code box.
+                  <p class="measure" role="status">
+                    {t("pair.preparing")}
+                  </p>
+                )}
+                <p class="measure">{t("pair.waitingReply")}</p>
+                <p class="hint">{t("pair.noWebcam")}</p>
+                <div class="row-actions">
+                  <button type="button" class="btn btn-secondary" onClick={() => setScanOpen(true)}>
+                    {t("pair.scanReply")}
+                  </button>
+                  <button type="button" class="btn btn-secondary" onClick={() => void pasteReply()}>
+                    {t("pair.pasteReply")}
+                  </button>
+                </div>
+              </section>
+            ) : null}
+
+            {screen === "SCANNING_OFFER" ? (
+              <section class="screen screen-join">
+                <h1>{t("pair.scanOffer")}</h1>
+                {/* Camera view with frame guide; the scanner is started lazily so
+                the camera permission prompt waits for an explicit action. */}
+                <div class="scanner-frame">
+                  <video ref={videoRef} class="scanner-video" playsInline muted />
+                </div>
+                <div class="row-actions">
+                  <button type="button" class="btn btn-primary" onClick={() => setScanOpen(true)}>
+                    {t("action.scan")}
+                  </button>
+                  <button type="button" class="btn btn-secondary" onClick={() => void pasteOffer()}>
+                    {t("action.paste")}
+                  </button>
+                </div>
+              </section>
+            ) : null}
+
+            {screen === "CONNECTING" || screen === "CONNECTED" ? (
+              <section
+                class="screen screen-connected"
+                // The transfer UI reads this to stay blocked until the host allows.
+                data-approval={side === "guest" ? "granted" : approved ? "allowed" : "pending"}
+              >
+                <Beam active={screen === "CONNECTED"} />
+                <h1>{t("connect.title")}</h1>
+                {/* FR-42: the peer's label is shown as text, never markup. */}
+                {peerName ? <p class="peer-name">{peerName}</p> : null}
+                {screen === "CONNECTING" ? <p class="measure">{t("connect.working")}</p> : null}
+                {screen === "CONNECTED" && phrase ? (
+                  <VerifyCard
+                    phrase={phrase}
+                    label={t("transfer.verification")}
+                    help={t("transfer.verificationHelp")}
+                    digitsLabel={t("transfer.verificationDigits")}
+                  />
+                ) : null}
+                {screen === "CONNECTED" && side === "host" ? (
+                  <p class="measure" role="status">
+                    {approved ? t("connect.allowed") : t("connect.pendingApproval")}
+                  </p>
+                ) : null}
+
+                {/* PRD 9.5: nothing may move until the host allows the peer. The
+                guest is granted on arrival, since it scanned a specific QR. */}
+                {screen === "CONNECTED" && (side === "guest" || approved) ? (
+                  <TransferPanel
+                    t={t}
+                    files={transfer.files}
+                    saved={transfer.saved}
+                    notes={transfer.notes}
+                    onSendFiles={(picked) => void transfer.sendFiles(picked)}
+                    onSendText={(body) => {
+                      transfer.sendText(body);
+                    }}
+                    onCancel={transfer.cancel}
+                    onDismissNote={transfer.dismissNote}
+                  />
+                ) : null}
+              </section>
+            ) : null}
+
+            {/* The machine reaches SHOWING_ANSWER a tick before the answer code is
+            encoded, so show the same preparing state the offer screen uses
+            rather than a blank main region. */}
+            {screen === "SHOWING_ANSWER" && !answerPlan ? (
+              <section class="screen screen-reply">
+                <h1>{t("connect.title")}</h1>
+                <p class="measure" role="status">
+                  {t("pair.preparing")}
+                </p>
+              </section>
+            ) : null}
+
+            {screen === "SHOWING_ANSWER" && answerPlan ? (
+              <section class="screen screen-reply">
+                <Beam active />
+                <h1>{t("connect.title")}</h1>
+                <MultiOrSingleQr plan={answerPlan} label={t("pair.title")} />
                 <CodeBox
-                  code={offerCode}
+                  code={answerCode}
                   label={t("action.copy")}
                   copyLabel={t("action.copy")}
                   copiedLabel={t("action.copied")}
                   onCopy={copy}
                 />
-              </>
-            ) : (
-              // Still gathering ICE (GATHERING): never show an empty code box.
-              <p class="measure" role="status">
-                {t("pair.preparing")}
-              </p>
-            )}
-            <p class="measure">{t("pair.waitingReply")}</p>
-            <p class="hint">{t("pair.noWebcam")}</p>
-            <div class="row-actions">
-              <button type="button" class="btn btn-secondary" onClick={() => setScanOpen(true)}>
-                {t("pair.scanReply")}
-              </button>
-              <button type="button" class="btn btn-secondary" onClick={() => void pasteReply()}>
-                {t("pair.pasteReply")}
-              </button>
-            </div>
-          </section>
-        ) : null}
-
-        {screen === "SCANNING_OFFER" ? (
-          <section class="screen screen-join">
-            <h1>{t("pair.scanOffer")}</h1>
-            {/* Camera view with frame guide; the scanner is started lazily so
-                the camera permission prompt waits for an explicit action. */}
-            <div class="scanner-frame">
-              <video ref={videoRef} class="scanner-video" playsInline muted />
-            </div>
-            <div class="row-actions">
-              <button type="button" class="btn btn-primary" onClick={() => setScanOpen(true)}>
-                {t("action.scan")}
-              </button>
-              <button type="button" class="btn btn-secondary" onClick={() => void pasteOffer()}>
-                {t("action.paste")}
-              </button>
-            </div>
-          </section>
-        ) : null}
-
-        {screen === "CONNECTING" || screen === "CONNECTED" ? (
-          <section
-            class="screen screen-connected"
-            // The transfer UI reads this to stay blocked until the host allows.
-            data-approval={side === "guest" ? "granted" : approved ? "allowed" : "pending"}
-          >
-            <Beam active={screen === "CONNECTED"} />
-            <h1>{t("connect.title")}</h1>
-            {/* FR-42: the peer's label is shown as text, never markup. */}
-            {peerName ? <p class="peer-name">{peerName}</p> : null}
-            {screen === "CONNECTING" ? <p class="measure">{t("connect.working")}</p> : null}
-            {screen === "CONNECTED" && phrase ? (
-              <VerifyCard
-                phrase={phrase}
-                label={t("transfer.verification")}
-                help={t("transfer.verificationHelp")}
-                digitsLabel={t("transfer.verificationDigits")}
-              />
-            ) : null}
-            {screen === "CONNECTED" && side === "host" ? (
-              <p class="measure" role="status">
-                {approved ? t("connect.allowed") : t("connect.pendingApproval")}
-              </p>
+              </section>
             ) : null}
 
-            {/* PRD 9.5: nothing may move until the host allows the peer. The
-                guest is granted on arrival, since it scanned a specific QR. */}
-            {screen === "CONNECTED" && (side === "guest" || approved) ? (
-              <TransferPanel
-                t={t}
-                files={transfer.files}
-                saved={transfer.saved}
-                notes={transfer.notes}
-                onSendFiles={(picked) => void transfer.sendFiles(picked)}
-                onSendText={(body) => {
-                  transfer.sendText(body);
-                }}
-                onCancel={transfer.cancel}
-                onDismissNote={transfer.dismissNote}
-              />
+            {error ? (
+              <div class="alert" role="alert">
+                <p>{messageForError(error, lang)}</p>
+                <button type="button" class="btn btn-primary" onClick={tryAgain}>
+                  {t("action.tryAgain")}
+                </button>
+              </div>
             ) : null}
-          </section>
-        ) : null}
-
-        {/* The machine reaches SHOWING_ANSWER a tick before the answer code is
-            encoded, so show the same preparing state the offer screen uses
-            rather than a blank main region. */}
-        {screen === "SHOWING_ANSWER" && !answerPlan ? (
-          <section class="screen screen-reply">
-            <h1>{t("connect.title")}</h1>
-            <p class="measure" role="status">
-              {t("pair.preparing")}
-            </p>
-          </section>
-        ) : null}
-
-        {screen === "SHOWING_ANSWER" && answerPlan ? (
-          <section class="screen screen-reply">
-            <Beam active />
-            <h1>{t("connect.title")}</h1>
-            <MultiOrSingleQr plan={answerPlan} label={t("pair.title")} />
-            <CodeBox
-              code={answerCode}
-              label={t("action.copy")}
-              copyLabel={t("action.copy")}
-              copiedLabel={t("action.copied")}
-              onCopy={copy}
-            />
-          </section>
-        ) : null}
-
-        {error ? (
-          <div class="alert" role="alert">
-            <p>{messageForError(error, lang)}</p>
-            <button type="button" class="btn btn-primary" onClick={tryAgain}>
-              {t("action.tryAgain")}
-            </button>
-          </div>
-        ) : null}
+          </>
+        )}
       </main>
 
       {/* The host can answer a reply code without leaving the

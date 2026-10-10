@@ -899,3 +899,174 @@ dialog.sheet {
 html[lang="hi"] {
   font-family: "Noto Sans Devanagari", var(--font-ui);
 }
+
+/* ------------------------------------------------------------------
+   FR-60/61 help + troubleshooting, FR-62 self-test, FR-51 send screen.
+   Two surfaces only (page + panel): sections divide with hairlines,
+   never nested cards (PRD 10.2 rule 3).
+   ------------------------------------------------------------------ */
+
+/* Quiet links under the home actions (PRD 10.2.1). */
+.home-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s-2);
+}
+
+/* FR-60 diagram: tokens via currentColor, accent beam, no motion. */
+.help-diagram {
+  width: 100%;
+  max-width: 320px;
+  align-self: center;
+  color: var(--ink-muted);
+}
+
+.hd-device {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.5;
+}
+
+.hd-qr {
+  fill: #ffffff;
+  stroke: var(--border-strong);
+  stroke-width: 1;
+}
+
+.hd-qr-eye {
+  fill: none;
+  stroke: #000000;
+  stroke-width: 2;
+}
+
+.hd-qr-dot {
+  fill: #000000;
+}
+
+.hd-beam {
+  fill: var(--accent);
+  stroke: var(--accent);
+  stroke-width: 2;
+}
+
+.hd-file {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.5;
+  stroke-linejoin: round;
+}
+
+.help-steps {
+  margin: 0;
+  padding-left: var(--s-6);
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-4);
+}
+
+.help-steps h2,
+.ts-section h2 {
+  font-family: var(--font-ui);
+  font-size: var(--fs-lg);
+  font-weight: 600;
+  line-height: 1.2;
+  margin: 0 0 var(--s-1);
+  color: var(--ink);
+}
+
+.help-steps p {
+  margin: 0;
+}
+
+/* Troubleshooting sections: hairline dividers, no panels. */
+.ts-section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-2);
+  width: 100%;
+  border-top: 1px solid var(--hairline);
+  padding-top: var(--s-4);
+}
+
+.ts-section p {
+  margin: 0;
+}
+
+.table-wrap {
+  width: 100%;
+  overflow-x: auto;
+}
+
+.support-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--fs-sm);
+}
+
+.support-table th,
+.support-table td {
+  text-align: left;
+  vertical-align: top;
+  padding: var(--s-2) var(--s-3) var(--s-2) 0;
+  border-bottom: 1px solid var(--hairline);
+}
+
+.support-table thead th {
+  color: var(--ink-muted);
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.support-table tbody th {
+  color: var(--ink);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.support-table td {
+  color: var(--ink);
+}
+
+/* FR-62: the outcome reads as text, never colour alone (PRD 10.4). */
+.selftest-status {
+  font-family: var(--font-mono);
+  font-size: var(--fs-md);
+  color: var(--ink);
+  margin: 0;
+  max-width: 62ch;
+}
+
+/* FR-51 staged files waiting on the Send screen. */
+.staged-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  width: 100%;
+  border-top: 1px solid var(--hairline);
+}
+
+.staged-row {
+  display: flex;
+  align-items: center;
+  gap: var(--s-3);
+  padding: var(--s-2) 0;
+  border-bottom: 1px solid var(--hairline);
+}
+
+.staged-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--ink);
+}
+
+.staged-size {
+  font-family: var(--font-mono);
+  font-size: var(--fs-sm);
+  color: var(--ink-muted);
+  flex: 0 0 auto;
+}

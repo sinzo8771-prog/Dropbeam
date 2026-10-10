@@ -342,7 +342,7 @@ library's docs gets an entry here (PRD section 0.3).
   `__BUILD_ID__` placeholder so each build rolls the cache name `dropbeam-<id>`.
   The worker is cache-first for static assets, network-first+offline-fallback for
   navigations, and announces a takeover to clients that were controlled by the
-  *previous* build only (first-install tabs receive no reload prompt).
+  _previous_ build only (first-install tabs receive no reload prompt).
 - **Reason:** A 4 KB PNG encoder costs nothing and keeps the dep tree unchanged;
   a plain JS worker at a stable URL is required by the spec (module workers are
   not yet widely supported as the SW entry); the versioned cache + `caches.delete`
@@ -367,3 +367,79 @@ library's docs gets an entry here (PRD section 0.3).
   the data-flow rules) and makes the banner reachable from any screen without
   touching the machine. Reloading is the correct action because `skipWaiting()` on
   install means the fresh SW is already in control.
+
+---
+
+## 2026-10-10 · Help, self-test and share target as pages layered over the shell (M7, FR-51, FR-60, FR-61, FR-62)
+
+- **Problem:** M7 still owed four PRD items: a "How it works" page with a
+  diagram (FR-60), a troubleshooting page (FR-61), an in-app connection
+  self-test (FR-62), and the Web Share Target with a staged Send screen
+  (FR-51). The connection state machine only models connection states, so
+  informational screens cannot become machine states, and the share-target
+  POST can only be answered by the service worker, not the page.
+- **Choice:**
+  - **Pages, not states.** `App` carries a small `page` state
+    (main / help / trouble / selftest / send) rendered in place of the
+    connection screens; any real screen change drops back to main so the
+    transfer UI can never hide behind an informational page. Home gains two
+    quiet links (How it works, Test my connection) per PRD 10.2.1.
+  - **Share staging in a cache.** The manifest posts `./share` to the worker;
+    `sw.js` stores each file in a `dropbeam-share` cache (the activate sweep
+    now exempts it, so a deploy cannot eat a share) and 303-redirects to
+    `#shared`. The page reads and clears the staging once (session-only per
+    FR-40) into a Send screen; staged files auto-send exactly once when the
+    normal approval gate opens, and a failure re-stages them with a toast.
+  - **Self-test as a loopback pair.** `runSelfTest()` wires two
+    RTCPeerConnections in memory (no STUN, no signalling server), proves the
+    path with a ping/pong data-channel round trip, and reports the failed
+    stage in PRD 7.1 vocabulary (gathering / connecting / unsupported). Both
+    the PC factory and the screen's runner are injectable, so the pass,
+    timeout and unsupported paths are unit-tested without a real network.
+  - **Troubleshooting table.** Browser names stay literal brand strings
+    (identical in every locale); all cell values and headings are catalog
+    keys, en + hi.
+- **Reason:** The page layer keeps the state machine's meaning intact
+  (ARCHITECTURE rule 2) and makes each new screen a pure component with unit
+  tests; the cache-staged share flow is the smallest correct shape for a
+  serverless PWA and keeps every byte on-device (FR-40, PRD 9.1).
+- **Also:** DoD 11's "every color token pair passes the 10.2 contrast
+  thresholds" is now enforced by `tests/unit/contrast.test.ts`, computed from
+  the shipped `tokens.css` for both themes (text ≥ 4.5:1, interactive
+  borders/focus ≥ 3:1) — no token needed adjusting.
+
+---
+
+## 2026-10-10 · Design-gate record: audit + polish + detector (M7, 10.7, DoD 11)
+
+- **Detector (`npx impeccable detect src public index.html`):** exit 0, zero
+  findings (the Fraunces ignore from 2026-10-03 is the only rule ever
+  suppressed). Re-run after the help/self-test/send screens landed.
+- **`/impeccable audit` scorecard** (per the installed skill's rubric):
+
+  | #         | Dimension                | Score     | Key finding                                                                                                                                                                                                                                    |
+  | --------- | ------------------------ | --------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+  | 1         | Accessibility            | 4         | Contrast is test-enforced (DoD 11); new screens walked in Chromium's accessibility tree: landmarks, h1→h2 order, real `table`/`list` semantics, `role="img"` label on the diagram, `role="status"` on the test result, global `:focus-visible` |
+  | 2         | Performance              | 4         | No new dependencies; 134 KB gz budget with ~19 KB headroom; self-test runs once per screen open and closes both peers on every exit path                                                                                                       |
+  | 3         | Responsive               | 4         | Single-column flow, 44 px targets (`.btn` min-height), support table scrolls inside `.table-wrap`, diagram capped at 320 px                                                                                                                    |
+  | 4         | Theming                  | 4         | New CSS uses tokens only; the QR tile's black-on-white is the PRD-mandated exception; both themes pinned by the contrast test                                                                                                                  |
+  | 5         | Implementation Integrity | 4         | Detector clean; no new shortcuts or system drift                                                                                                                                                                                               |
+  | **Total** |                          | **20/20** | **Excellent**                                                                                                                                                                                                                                  |
+
+- **`/impeccable polish` pass:** triaged the new surfaces against the
+  playbook (flow → states → hierarchy → consistency → cleanup). No P0–P2
+  changes needed; one known P3 stands: Vite's dev-only inline HMR styles
+  trip the strict `style-src 'self'` CSP in the console (dev-only, documented
+  above, production CSP unaffected). One pre-existing gap flagged, not
+  introduced here: FR-41's settings sheet has no UI surface yet (the store,
+  keys and i18n exist), so the troubleshooting page describes Across
+  networks without a toggle to reach it.
+- **Lighthouse (mobile profile, v11, against `vite preview`):** Performance
+  99, Accessibility 100, PWA 100 — M7's "≥ 90 each" gate met. The first run
+  scored PWA 75 because the manifest declared `theme_color` as a
+  media-scoped array, which is not valid manifest syntax: browsers and
+  Lighthouse both ignored it (the per-scheme tinting that actually works is
+  the pair of `<meta name="theme-color">` tags in `index.html`, kept as-is).
+  The manifest now carries a single fallback string and the PWA category is
+  pinned to 100 by the run above; `tests/unit/pwa.test.ts` asserts the
+  string form so the array cannot come back.
