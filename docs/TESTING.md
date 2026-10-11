@@ -50,8 +50,11 @@ stamped build id in place:
 
 ## Manual device matrix
 
-Recorded in `docs/INTEROP.md` (PRD 13.4). Still to be run on physical
-devices — the last gate before `v1.0` (M8).
+Recorded in `docs/INTEROP.md` (PRD 13.4). The rows that need only
+different engines are automated locally (`scripts/interop-matrix.mjs`:
+Chromium ↔ Chromium and Chromium ↔ Firefox, both directions). What is
+left needs physical devices: the camera QR route, Wi-Fi / hotspot /
+guest-network behaviour, real Safari, and mobile power/screen review.
 
 ## Release audit (one-off)
 
