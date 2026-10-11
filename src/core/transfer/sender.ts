@@ -4,13 +4,16 @@ import { BackpressureController } from "./backpressure";
 import { createHasher, type Hasher } from "./hash";
 import {
   CHUNK_SIZE,
+  chunkOffset,
   decodeControl,
   encodeControl,
   encodeDataFrame,
   uuid,
   type ControlMessage,
+  type ResumedFile,
 } from "./protocol";
 import type { FilePhase } from "./phase";
+import { resumeStore, type ResumeStore } from "./resume-store";
 
 export type { FilePhase };
 
@@ -30,6 +33,11 @@ export type SenderEvents = {
   onPhase?(fid: number, phase: FilePhase): void;
   onProgress?(fid: number, sent: number, total: number): void;
   onError?(fid: number | null, code: ErrorCode): void;
+  /**
+   * The peer announced parked partials that match files this side still
+   * holds: the session should re-offer them from those offsets.
+   */
+  onResumable?(peer: ResumedFile[]): void;
 };
 
 function concat(a: Uint8Array, b: Uint8Array): Uint8Array<ArrayBuffer> {
@@ -45,8 +53,9 @@ function concat(a: Uint8Array, b: Uint8Array): Uint8Array<ArrayBuffer> {
  * Notes:
  * - Offers are serialized: one batch is in flight at a time, so fid ranges
  *   never overlap (see docs/DECISIONS.md on fid parity).
- * - `fidParity` separates the two directions: the handshake offerer uses odd
- *   fids, the answerer even, so `ok/err/cancel {fid}` are never ambiguous.
+ * - `fidParity` separates the two directions: the host (the WebRTC offerer,
+ *   parity 1) allocates even fids, the guest (parity 0) odd, so
+ *   `ok/err/cancel {fid}` are never ambiguous.
  */
 export class Sender {
   private readonly bp: BackpressureController;
@@ -63,6 +72,8 @@ export class Sender {
   private readonly pendingErrors = new Map<number, ErrorCode>();
   private readonly cancelRequested = new Set<number>();
   private currentFid: number | null = null;
+  /** Files of the current attempt, so a dropped channel can park them. */
+  private readonly inflight = new Map<number, OutboundFile>();
   private offerQueue: Promise<unknown> = Promise.resolve();
   private disposed = false;
   private nextFidIndex = 0;
@@ -71,6 +82,7 @@ export class Sender {
     private readonly channel: ChannelLike,
     private readonly events: SenderEvents = {},
     private readonly fidParity: 0 | 1 = 0,
+    private readonly store: ResumeStore = resumeStore,
   ) {
     this.bp = new BackpressureController(channel);
     this.channel.addEventListener("message", this.onMessage);
@@ -121,6 +133,13 @@ export class Sender {
         }
         break;
       }
+      case "resume": {
+        // The receiver still holds partials from a dropped session. Any
+        // file we were streaming that matches one is offered again from
+        // that offset instead of from byte zero.
+        if (msg.files.length > 0) this.events.onResumable?.(msg.files);
+        break;
+      }
       default:
         break;
     }
@@ -166,6 +185,8 @@ export class Sender {
    */
   sendFiles(
     files: { blob: Blob; name: string; type?: string; path?: string }[],
+    /** Re-offering parked files: per-index chunks the receiver already holds. */
+    resumeChunks?: number[],
   ): Promise<SendOffer> {
     const run = async (): Promise<SendOffer> => {
       const id = uuid();
@@ -177,6 +198,7 @@ export class Sender {
         ...(f.path ? { path: f.path } : {}),
       }));
       for (const f of outbound) this.setPhase(f.fid, "QUEUED");
+      for (const f of outbound) this.inflight.set(f.fid, f);
       const totalSize = files.reduce((n, f) => n + f.blob.size, 0);
 
       const offer: SendOffer = { id, files: outbound, totalSize };
@@ -184,12 +206,14 @@ export class Sender {
         encodeControl({
           k: "offer",
           id,
-          files: outbound.map((f) => ({
+          files: outbound.map((f, index) => ({
             fid: f.fid,
             name: f.name,
             size: f.blob.size,
             type: f.type,
             ...(f.path ? { path: f.path } : {}),
+            // Resume point, when re-offering a file the peer still holds.
+            ...(resumeChunks?.[index] ? { chunks: resumeChunks[index]! } : {}),
           })),
           totalSize,
         }),
@@ -202,17 +226,19 @@ export class Sender {
         return offer;
       }
 
-      for (const f of outbound) {
+      for (const [index, f] of outbound.entries()) {
         if (!acceptedFids.includes(f.fid)) {
+          this.inflight.delete(f.fid);
           this.setPhase(f.fid, "DECLINED");
           continue;
         }
         if (this.cancelRequested.has(f.fid)) {
+          this.inflight.delete(f.fid);
           this.setPhase(f.fid, "CANCELED");
           continue;
         }
         this.setPhase(f.fid, "ACCEPTED");
-        await this.streamFile(f);
+        await this.streamFile(f, resumeChunks?.[index] ?? 0);
       }
       return offer;
     };
@@ -222,7 +248,13 @@ export class Sender {
     return result;
   }
 
-  private async streamFile(f: OutboundFile): Promise<void> {
+  /**
+   * Streams one file. `resumeFromChunks` > 0 means the receiver already
+   * holds that many leading chunks: the blob is read from that offset and
+   * the first frame's `seq` continues the sequence, so nothing already
+   * received is sent again.
+   */
+  private async streamFile(f: OutboundFile, resumeFromChunks = 0): Promise<void> {
     const earlyError = this.pendingErrors.get(f.fid);
     if (earlyError) {
       this.pendingErrors.delete(f.fid);
@@ -233,11 +265,22 @@ export class Sender {
     this.setPhase(f.fid, "TRANSFERRING");
     this.currentFid = f.fid;
     const hasher = await createHasher();
-    let seq = 0;
+    let seq = resumeFromChunks;
     let canceled = false;
+    const resumeFromBytes = chunkOffset(resumeFromChunks);
+    if (resumeFromBytes > 0) {
+      // The receiver re-hashes the prefix it already staged, so seed ours
+      // with the same bytes: both sides must hash the whole file, not just
+      // what crosses the wire on this attempt.
+      const prefix = await f.blob.slice(0, resumeFromBytes).arrayBuffer();
+      hasher.update(new Uint8Array(prefix));
+    }
 
     try {
-      const reader = f.blob.stream().getReader();
+      // A slice is a window, not a copy, so resuming a multi-gigabyte file
+      // costs no extra memory.
+      const stream = resumeFromBytes > 0 ? f.blob.slice(resumeFromBytes).stream() : f.blob.stream();
+      const reader = stream.getReader();
       let carry: Uint8Array<ArrayBuffer> | null = null;
       for (;;) {
         if (this.cancelRequested.has(f.fid)) {
@@ -260,14 +303,20 @@ export class Sender {
         }
         let offset = 0;
         while (data.byteLength - offset >= CHUNK_SIZE) {
-          await this.emitChunk(f, data.subarray(offset, offset + CHUNK_SIZE), seq, hasher);
+          await this.emitChunk(
+            f,
+            data.subarray(offset, offset + CHUNK_SIZE),
+            seq,
+            hasher,
+            resumeFromBytes,
+          );
           seq += 1;
           offset += CHUNK_SIZE;
         }
         if (offset < data.byteLength) carry = data.slice(offset);
       }
       if (!canceled && carry && carry.byteLength > 0) {
-        await this.emitChunk(f, carry, seq, hasher);
+        await this.emitChunk(f, carry, seq, hasher, resumeFromBytes);
         seq += 1;
       }
       if (canceled || this.cancelRequested.has(f.fid)) {
@@ -309,11 +358,15 @@ export class Sender {
     chunk: Uint8Array,
     seq: number,
     hasher: Hasher,
+    /** Absolute file offset of chunk `seq`, so resumed rows continue. */
+    baseOffset = 0,
   ): Promise<void> {
     await this.bp.drain();
     hasher.update(chunk);
     this.channel.send(encodeDataFrame(f.fid, seq, chunk));
-    const sent = (seq + 1) * CHUNK_SIZE;
+    // Progress is absolute in the file: a resumed transfer's row picks up
+    // where it stopped instead of jumping back to zero.
+    const sent = baseOffset + (seq + 1 - baseOffset / CHUNK_SIZE) * CHUNK_SIZE;
     this.events.onProgress?.(f.fid, Math.min(sent, f.blob.size), f.blob.size);
   }
 
@@ -342,6 +395,22 @@ export class Sender {
     this.disposed = true;
     this.channel.removeEventListener("message", this.onMessage);
     this.bp.dispose();
+    // The channel is gone: park any non-terminal file so a re-paired
+    // session can continue it. The `Blob` stays readable for the tab's
+    // lifetime, which is exactly how long resuming is possible.
+    for (const f of this.inflight.values()) {
+      const phase = this.phases.get(f.fid);
+      if (phase && phase !== "DONE" && phase !== "FAILED" && phase !== "CANCELED") {
+        this.store.parkOutbound({
+          name: f.name,
+          size: f.blob.size,
+          type: f.type,
+          ...(f.path ? { path: f.path } : {}),
+          blob: f.blob,
+        });
+      }
+    }
+    this.inflight.clear();
     for (const w of this.responseWaiters.values()) w.resolve(null);
     this.responseWaiters.clear();
     for (const w of this.verifiedWaiters.values()) w.reject(new DropbeamError("CANCELED"));

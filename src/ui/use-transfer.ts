@@ -4,6 +4,8 @@ import type { IncomingOffer, IncomingText } from "../core/transfer/receiver";
 import type { ChannelLike } from "../core/transfer/channel";
 import type { SaveResult } from "../core/storage/sink";
 import type { ErrorCode } from "../core/errors";
+import { resumeStore } from "../core/transfer/resume-store";
+import { discardResumable } from "../core/transfer/discard-resume";
 
 /**
  * Owns one `TransferSession` for the life of an open channel (PRD 8.4/8.5).
@@ -25,6 +27,12 @@ export type TransferView = {
   /** The offer awaiting the user's decision, or null (FR-13). */
   offer: IncomingOffer | null;
   error: ErrorCode | null;
+  /**
+   * Partial files a dropped session left behind (roadmap: resumable
+   * transfers). Pairing again continues them; nothing already received is
+   * re-sent.
+   */
+  resumable: { fid: number; name: string; size: number }[];
 };
 
 export type UseTransfer = TransferView & {
@@ -37,6 +45,8 @@ export type UseTransfer = TransferView & {
   cancel(fid: number): void;
   /** Dismiss a received note once it has been read. */
   dismissNote(id: string): void;
+  /** Drop a parked partial and its staged bytes (Discard). */
+  discardResumable(name: string, size: number): Promise<void>;
   /** True once there is a channel to transfer over. */
   ready: boolean;
 };
@@ -67,6 +77,9 @@ export function useTransfer(opts: UseTransferOptions): UseTransfer {
   const [offer, setOffer] = useState<IncomingOffer | null>(null);
   const [error, setError] = useState<ErrorCode | null>(null);
   const sessionRef = useRef<TransferSession | null>(null);
+  // Bumped whenever the session is disposed, so the parked-partial list is
+  // re-read after a drop — that is exactly when it changes.
+  const [parkedTick, setParkedTick] = useState(0);
 
   useEffect(() => {
     // No channel yet, or the previous one went away: start from a clean slate
@@ -99,8 +112,17 @@ export function useTransfer(opts: UseTransferOptions): UseTransfer {
     return () => {
       session.dispose();
       sessionRef.current = null;
+      // The session parked whatever was in flight; the UI offers to resume it.
+      setParkedTick((t) => t + 1);
     };
   }, [channel, deviceName, autoAccept, fidParity]);
+
+  const resumable = (() => {
+    // `parkedTick` is the dependency: the store itself is a singleton that
+    // only changes on dispose, discard or resume.
+    void parkedTick;
+    return resumeStore.inboundList().map((p) => ({ fid: p.fid, name: p.name, size: p.size }));
+  })();
 
   const sendFiles = useCallback(async (picked: File[]): Promise<void> => {
     const session = sessionRef.current;
@@ -142,18 +164,25 @@ export function useTransfer(opts: UseTransferOptions): UseTransfer {
     setNotes((prev) => prev.filter((n) => n.id !== id));
   }, []);
 
+  const discard = useCallback(async (name: string, size: number): Promise<void> => {
+    await discardResumable(name, size);
+    setParkedTick((t) => t + 1);
+  }, []);
+
   return {
     files,
     saved,
     notes,
     offer,
     error,
-    ready: channel !== null,
+    resumable,
     sendFiles,
     sendText,
     acceptOffer,
     declineOffer,
     cancel,
     dismissNote,
+    discardResumable: discard,
+    ready: channel !== null,
   };
 }

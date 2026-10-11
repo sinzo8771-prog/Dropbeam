@@ -831,6 +831,33 @@ export function App({ settings, baseUrl }: AppProps = {}) {
             {error ? (
               <div class="alert" role="alert">
                 <p>{messageForError(error, lang)}</p>
+                {/* Roadmap (resumable transfers): a drop parks what was in
+                    flight. Pair again and the transfer continues; nothing
+                    already received is sent a second time. */}
+                {error === "PEER_LOST" && transfer.resumable.length > 0 ? (
+                  <>
+                    <p class="measure">{t("resume.hint", { count: transfer.resumable.length })}</p>
+                    <ul class="rows">
+                      {transfer.resumable.map((file) => (
+                        <li class="row" key={`${file.name}-${file.size}`}>
+                          <div class="row-head">
+                            <span class="row-name">{file.name}</span>
+                            <button
+                              type="button"
+                              class="btn btn-ghost"
+                              onClick={() => void transfer.discardResumable(file.name, file.size)}
+                            >
+                              {t("resume.discard")}
+                            </button>
+                          </div>
+                          <div class="row-foot">
+                            <span class="row-size">{formatBytes(file.size)}</span>
+                          </div>
+                        </li>
+                      ))}
+                    </ul>
+                  </>
+                ) : null}
                 <button type="button" class="btn btn-primary" onClick={tryAgain}>
                   {t("action.tryAgain")}
                 </button>

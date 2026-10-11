@@ -27,10 +27,16 @@ the contrast gate computed from the shipped tokens (PRD 13.1).
 ## Integration (`tests/integration`)
 
 Two `RTCPeerConnection`s in one page (loopback) transferring: 0-byte file,
-1 byte, 16 KiB ± 1, 5 MB; cancel mid-way; decline; hash mismatch injection;
+1 byte, 16 KiB A→1, 5 MB; cancel mid-way; decline; hash mismatch injection;
 peer drop. The pairing integration drives two `SessionController`s with real
 DB1 codes and covers expiry, cleanup and the snapshot's `codeExpiresAt`
-(PRD 13.2).
+(PRD 13.2). The resume integration (`resume.test.ts`) drops a transfer after
+two chunks — a channel that stops forwarding mid-file, control frames
+included — re-pairs, and proves the receiver's parked offset continues with
+exactly the missing chunk re-crossing the wire and the file verifying
+byte-identical; it also pins that memory sinks start over (with a fresh
+prompt), that a clean transfer leaves nothing parked, and that `chunks` past
+the end of a file are rejected on the wire (PRD 9.4).
 
 ## End-to-end (`tests/e2e`)
 

@@ -16,13 +16,30 @@ export type OfferedFile = {
   size: number;
   type: string;
   path?: string;
+  /**
+   * Resume point: how many leading chunks of this file the receiver already
+   * holds (roadmap: resumable transfers). Absent for a fresh offer; the sender
+   * sets it when it re-offers a file that matches the receiver's parked partial.
+   */
+  chunks?: number;
 };
 
 export type PeerCaps = { fsa: boolean; opfs: boolean };
 
+/** One parked partial file, as announced by a receiver after `hello`. */
+export type ResumedFile = {
+  /** The fid the *previous* session used, for UI continuity. */
+  fid: number;
+  name: string;
+  size: number;
+  /** Contiguous chunks already written to the receiving sink. */
+  chunks: number;
+};
+
 export type ControlMessage =
   | { k: "hello"; v: number; name?: string; caps: PeerCaps }
   | { k: "offer"; id: string; files: OfferedFile[]; totalSize: number }
+  | { k: "resume"; files: ResumedFile[] }
   | { k: "accept"; id: string; fids: number[] }
   | { k: "decline"; id: string }
   | { k: "done"; fid: number; sha256: string }
@@ -46,8 +63,43 @@ function isOfferedFile(v: unknown): v is OfferedFile {
     typeof f.name === "string" &&
     typeof f.size === "number" &&
     typeof f.type === "string" &&
-    (f.path === undefined || typeof f.path === "string")
+    (f.path === undefined || typeof f.path === "string") &&
+    // Resume point, when the peer re-offers a parked file. Bounded by the
+    // file size (PRD 9.4): a peer cannot claim an offset past the end and
+    // make us zero-fill the staged bytes.
+    (f.chunks === undefined ||
+      (typeof f.chunks === "number" &&
+        Number.isInteger(f.chunks) &&
+        f.chunks >= 0 &&
+        f.chunks * CHUNK_SIZE <= (f.size as number)))
   );
+}
+
+function isResumedFile(v: unknown): v is ResumedFile {
+  if (typeof v !== "object" || v === null) return false;
+  const f = v as Record<string, unknown>;
+  return (
+    typeof f.fid === "number" &&
+    Number.isInteger(f.fid) &&
+    typeof f.name === "string" &&
+    typeof f.size === "number" &&
+    typeof f.chunks === "number" &&
+    Number.isInteger(f.chunks) &&
+    f.chunks >= 0 &&
+    f.chunks * CHUNK_SIZE <= (f.size as number)
+  );
+}
+
+/* ---------------- chunk arithmetic ---------------- */
+
+/** Chunks a `size`-byte file needs; the last one may be short (PRD 8.4). */
+export function chunkCount(size: number): number {
+  return Math.ceil(size / CHUNK_SIZE);
+}
+
+/** Chunk `index` covers `[offset, offset + size)`, except the last chunk. */
+export function chunkOffset(index: number): number {
+  return index * CHUNK_SIZE;
 }
 
 /**
@@ -85,6 +137,14 @@ export function decodeControl(raw: unknown): ControlMessage | null {
           ? m.totalSize
           : files.reduce((n, f) => n + f.size, 0);
       return { k: "offer", id: m.id.slice(0, 64), files, totalSize };
+    }
+    case "resume": {
+      // Receiver → sender, right after hello: the partials this side still
+      // holds. A peer that does not know the message drops it (null above
+      // is only for malformed frames, so an unknown `k` lands in `default`).
+      if (!Array.isArray(m.files)) return null;
+      const files = m.files.filter(isResumedFile).slice(0, 4096);
+      return { k: "resume", files };
     }
     case "accept": {
       if (typeof m.id !== "string" || !Array.isArray(m.fids)) return null;

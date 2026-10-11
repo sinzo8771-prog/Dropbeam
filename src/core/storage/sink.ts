@@ -26,6 +26,12 @@ export interface Sink {
   write(chunk: Uint8Array): Promise<void>;
   close(): Promise<SaveResult>;
   abort(): Promise<void>;
+  /**
+   * The first `bytes` already staged on disk, for re-hashing a resumed
+   * transfer's prefix. Only sinks that keep data between sessions provide
+   * it (OPFS/FSA); memory sinks cannot resume at all.
+   */
+  readPrefix?(bytes: number): Promise<Uint8Array>;
 }
 
 export class SinkError extends Error {

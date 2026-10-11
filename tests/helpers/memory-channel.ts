@@ -9,6 +9,12 @@ export type MemoryChannelOptions = {
   tickMs?: number;
   /** Deliver to the peer after this delay (ms); 0 = next microtask. */
   latencyMs?: number;
+  /**
+   * Stop delivering data frames to the peer after this many (simulates a
+   * network that stops forwarding mid-transfer): the sender keeps writing
+   * into its buffer while the receiver waits for the next sequence number.
+   */
+  stallDataFramesAfter?: number;
   /** Mutate outgoing binary frames (used for hash-mismatch injection). */
   interceptOutgoing?: (data: string | ArrayBuffer | ArrayBufferView, from: MemoryChannel) => void;
   /** Return true to drop an outgoing message (used for SEQ_GAP injection). */
@@ -32,6 +38,8 @@ export class MemoryChannel implements ChannelLike {
   private readonly inbox: (string | ArrayBuffer)[] = [];
   private drainTimer: ReturnType<typeof setInterval> | null = null;
   private readonly opts: MemoryChannelOptions;
+  private binarySent = 0;
+  private stalled = false;
 
   constructor(opts: MemoryChannelOptions = {}) {
     this.opts = opts;
@@ -75,6 +83,10 @@ export class MemoryChannel implements ChannelLike {
     if (this.readyState !== "open") throw new Error("InvalidStateError: channel not open");
     this.opts.interceptOutgoing?.(data, this);
     if (this.opts.dropOutgoing?.(data, this)) return;
+    // Past the stall point this sender's bytes go nowhere — including the
+    // control frames that follow the data (a `done` the peer never sees is
+    // exactly what a network that died mid-transfer looks like).
+    if (this.stalled) return;
     const bytes =
       typeof data === "string"
         ? data.length
@@ -89,6 +101,18 @@ export class MemoryChannel implements ChannelLike {
     else {
       const view = new Uint8Array(data.buffer, data.byteOffset, data.byteLength);
       outgoing = view.slice().buffer;
+    }
+
+    // Arm the stall after the Nth data frame: that one still arrives, the
+    // next one does not.
+    if (typeof data !== "string") {
+      this.binarySent += 1;
+      if (
+        this.opts.stallDataFramesAfter !== undefined &&
+        this.binarySent >= this.opts.stallDataFramesAfter
+      ) {
+        this.stalled = true;
+      }
     }
 
     const deliver = (): void => {

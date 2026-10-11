@@ -616,7 +616,7 @@ Full manual device matrix, fix bugs, write `INTEROP.md`, README with GIF demo, t
 
 ## 19. Roadmap (post v1, do not build now)
 
-- Auto-reconnect and resumable transfers (chunk bitmap, hash tree).
+- Resumable transfers: shipped for the re-pair case (chunk offset, whole-file hash; see DECISIONS 2026-10-11). The chunk bitmap / hash tree for per-chunk repair, and auto-reconnect _within_ a session, remain roadmap.
 - Multi-peer rooms (mesh) and one-to-many broadcast.
 - Optional tiny signaling relay (e.g. a free Worker) for **short numeric pairing codes**, still no file relay; strictly opt-in.
 - Optional TURN guidance for self-hosters.

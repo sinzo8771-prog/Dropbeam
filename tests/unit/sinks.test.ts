@@ -8,27 +8,58 @@ import { SinkError, type SinkMeta } from "../../src/core/storage/sink";
 const META: SinkMeta = { name: "report.pdf", size: 6, type: "application/pdf" };
 const PAYLOAD = new Uint8Array([1, 2, 3, 4, 5, 6]);
 
-/** Records every chunk written, so we can assert the byte stream is intact. */
+/** Whatever a `FileSystemWritableFileStream.write` call carries, as bytes. */
+function toBytes(value: unknown): Uint8Array {
+  if (value instanceof ArrayBuffer) return new Uint8Array(value);
+  if (ArrayBuffer.isView(value)) {
+    return new Uint8Array(value.buffer, value.byteOffset, value.byteLength);
+  }
+  return new Uint8Array();
+}
+
+/**
+ * A FileSystemWritableFileStream stand-in that models the real API: writes
+ * are positioned (`{type:"write", position, data}`) or plain, and
+ * `createWritable({keepExistingData})` decides whether the previous content
+ * survives — which is what the OPFS resume path depends on.
+ */
 function fakeWritable() {
-  const written: Uint8Array[] = [];
-  return {
-    written,
-    closed: false,
-    aborted: false,
-    handle: {
-      createWritable: async () => ({
-        write: async (chunk: BufferSource) => {
-          written.push(new Uint8Array(chunk as ArrayBuffer));
-        },
-        close: async () => {
-          state.closed = true;
-        },
-        abort: async () => {
-          state.aborted = true;
-        },
-      }),
+  const bytes: number[] = [];
+  let cursor = 0;
+  const writable = {
+    write: async (write: unknown) => {
+      const positioned =
+        typeof write === "object" &&
+        write !== null &&
+        (write as { type?: string }).type === "write" &&
+        typeof (write as { position?: number }).position === "number";
+      const position = positioned ? (write as { position: number }).position : cursor;
+      const raw = positioned ? (write as { data: unknown }).data : write;
+      const data = toBytes(raw);
+      while (bytes.length < position) bytes.push(0);
+      for (let i = 0; i < data.byteLength; i++) bytes[position + i] = data[i]!;
+      cursor = Math.max(cursor, position + data.byteLength);
+    },
+    close: async () => {
+      state.closed = true;
+    },
+    abort: async () => {
+      state.aborted = true;
     },
   };
+  const handle = {
+    createWritable: async (opts?: { keepExistingData?: boolean }) => {
+      // A resumed stream continues from the end of the staged data.
+      cursor = opts?.keepExistingData ? bytes.length : 0;
+      if (!opts?.keepExistingData) bytes.length = 0;
+      return writable;
+    },
+    getFile: async () => new Blob([new Uint8Array(bytes)], { type: "application/pdf" }),
+    remove: async () => {
+      bytes.length = 0;
+    },
+  };
+  return { bytes, handle };
 }
 
 const state = { closed: false, aborted: false };
@@ -42,10 +73,8 @@ describe("FsaSink (PRD 8.5)", () => {
     await sink.write(PAYLOAD.subarray(3));
     const result = await sink.close();
     expect(result).toEqual({ name: "report.pdf", size: 6, sink: "fsa" });
-    expect(fake.written.map((c) => [...c])).toEqual([
-      [1, 2, 3],
-      [4, 5, 6],
-    ]);
+    // The byte stream on disk, not the chunk boundaries the sink was fed.
+    expect(fake.bytes).toEqual([1, 2, 3, 4, 5, 6]);
     expect(state.closed).toBe(true);
   });
 
@@ -118,18 +147,43 @@ describe("OpfsSink (PRD 8.5)", () => {
     });
   }
 
+  /**
+   * OPFS stand-in that models the positioned-write API and keeps the staged
+   * bytes across `createWritable` calls — the resume path re-opens the same
+   * `.part` in a brand-new sink object, so persistence is the whole point.
+   */
   function stubOpfs() {
     const staged: number[] = [];
     let removed = false;
+    let cursor = 0;
+    const writable = {
+      write: async (write: unknown) => {
+        const positioned =
+          typeof write === "object" &&
+          write !== null &&
+          (write as { type?: string }).type === "write" &&
+          typeof (write as { position?: number }).position === "number";
+        const position = positioned ? (write as { position: number }).position : cursor;
+        const raw = positioned ? (write as { data: unknown }).data : write;
+        const data = toBytes(raw);
+        while (staged.length < position) staged.push(0);
+        for (let i = 0; i < data.byteLength; i++) staged[position + i] = data[i]!;
+        cursor = Math.max(cursor, position + data.byteLength);
+      },
+      close: async () => {},
+      abort: async () => {},
+    };
     const dir = {
       getFileHandle: async () => ({
-        createWritable: async () => ({
-          write: async (c: BufferSource) => void staged.push(...new Uint8Array(c as ArrayBuffer)),
-          close: async () => {},
-        }),
+        createWritable: async (opts?: { keepExistingData?: boolean }) => {
+          cursor = opts?.keepExistingData ? staged.length : 0;
+          if (!opts?.keepExistingData) staged.length = 0;
+          return writable;
+        },
         getFile: async () => new Blob([new Uint8Array(staged)]),
         remove: async () => {
           removed = true;
+          staged.length = 0;
         },
       }),
     };
@@ -151,6 +205,34 @@ describe("OpfsSink (PRD 8.5)", () => {
     expect(result.size).toBe(6);
     expect(stub.staged).toEqual([1, 2, 3, 4, 5, 6]);
     expect(sink.stagingPath).toContain("dropbeam/");
+  });
+
+  it("resumes a staged file at a chunk boundary (roadmap: resumable transfers)", async () => {
+    const stub = stubOpfs();
+    // First attempt gets three bytes in before the connection drops.
+    const first = await OpfsSink.create("photo.jpg");
+    await first.open({ ...META, name: "photo.jpg" });
+    await first.write(PAYLOAD.subarray(0, 3));
+
+    // A new session re-opens the same staged file at byte 3 and continues.
+    const resumed = await OpfsSink.resume("photo.jpg", 3);
+    await resumed.open({ ...META, name: "photo.jpg" });
+    await resumed.write(PAYLOAD.subarray(3));
+    const result = await resumed.close();
+    expect(result.size).toBe(6);
+    // The earlier bytes survived the re-open; the tail landed at its offset.
+    expect(stub.staged).toEqual([1, 2, 3, 4, 5, 6]);
+  });
+
+  it("re-hashes a resumed prefix from the staged file", async () => {
+    stubOpfs();
+    const first = await OpfsSink.create("photo.jpg");
+    await first.open({ ...META, name: "photo.jpg" });
+    await first.write(PAYLOAD.subarray(0, 3));
+
+    const resumed = await OpfsSink.resume("photo.jpg", 3);
+    await resumed.open({ ...META, name: "photo.jpg" });
+    expect([...(await resumed.readPrefix(3))]).toEqual([1, 2, 3]);
   });
 
   it("removes the staged part file on abort", async () => {

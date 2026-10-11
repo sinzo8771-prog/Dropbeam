@@ -81,6 +81,9 @@
   "update.available": "New version available.",
   "update.reload": "Reload",
 
+  "resume.hint": "{count} file(s) interrupted. Pair again to resume — nothing already received is re-sent.",
+  "resume.discard": "Discard",
+
   "debug.title": "Debug panel",
   "debug.hint": "Opened with the developer gesture: eight taps on the right edge of the screen.",
   "debug.buildId": "Build id",

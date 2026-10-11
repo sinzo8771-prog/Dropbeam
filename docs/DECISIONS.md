@@ -48,7 +48,8 @@ library's docs gets an entry here (PRD section 0.3).
   but not the wire details: frame layout, fid uniqueness, flow control, and how
   `ok`/`err`/`cancel` reference files.
 - **Choice:** 16 KiB chunks; data frame `[1B type=0x01][4B fid BE][4B seq BE][payload]`;
-  fids allocated with direction parity (offerer uses odd, answerer even) so
+  fids allocated with direction parity (the host, which creates the WebRTC
+  offer, gets even fids via parity 1; the guest odd via parity 0) so
   `{fid}` control messages are unambiguous; backpressure pauses above 1 MiB
   buffered and resumes at ≤256 KiB; offers are serialized (one batch in flight);
   the receiver opens every sink _before_ replying `accept` (so no data frame can
@@ -600,3 +601,53 @@ end of this entry).
   the rest change the protocol, the threat model or the deployment story
   and should not be guessed at. Initial JS went 147.0 → 148.3 KB of the
   153.6 KB budget; 272 unit/integration + 13 e2e tests green.
+
+## 2026-10-11 · Resumable transfers: re-pairing continues a dropped file (§19)
+
+The previous entry deferred resumable transfers pending a decision. The
+decision is now made (below); the reconnect-within-a-session half stays
+roadmap.
+
+- **Problem:** §19 asked for "auto-reconnect and resumable transfers
+  (chunk bitmap, hash tree)". A dropped `RTCPeerConnection` ends the
+  session — a re-connect needs a new handshake (PRD 5.1) — so the real
+  gap was what happens _after_ the user pairs again: both sides still
+  hold what they had, and the file should continue, not restart.
+- **Choice:**
+  - `ResumeStore` (in-memory, one per tab) parks what a dropped session
+    left behind: the receiver its staged prefix (`parkInbound`), the
+    sender its Blob (`parkOutbound`). Both are keyed by (name, size) —
+    never by fid, because fids are allocated per session
+    (`parity + 1 + index * 2`, cumulative) and cannot identify a file
+    across sessions. Only disk-backed sinks are parked (`memory` bytes
+    die with the page); those files start over and re-prompt.
+  - Wire: a new control message `{k:"resume", files:[{fid, name, size,
+chunks}]}`, announced by the receiver right after `hello`. The sender
+    re-offers a matching parked file with `chunks` on the offer and
+    streams from `chunks × 16 KiB`; the receiver re-opens its sink at that
+    offset. Offsets travel positionally (`sendFiles(files, resumeChunks)`),
+    not by fid.
+  - Integrity: **no** chunk bitmap / hash tree yet. Both sides still hash
+    the whole file — the receiver re-hashes its staged prefix, the sender
+    seeds its hasher with the same prefix and hashes only the tail — so
+    the existing SHA-256 `done`/`ok` exchange proves the reassembled file
+    end to end with zero new wire messages. A bitmap would buy per-chunk
+    repair of a completed-but-corrupt file; the protocol fails fast on
+    mismatch today, so that cost is not warranted yet.
+  - Prompt rule (FR-13): a resumed file is auto-accepted only when every
+    offered file has a parked partial (`fresh.length === 0`); anything new
+    still prompts. The UI surfaces parked files (resume hint on
+    `PEER_LOST`, discard rows) so a half-received file can be cleared.
+  - Security (PRD 9.4): `chunks` is bounded by the offered size on both
+    the announcement and the offer, so a peer cannot claim an offset past
+    EOF and make us zero-fill staged bytes.
+- **Reason:** additive, no new infrastructure, no threat-model change,
+  and fully testable without a network: `MemoryChannel` gained
+  `stallDataFramesAfter`, modelling a link that dies after the Nth data
+  frame — control frames after it are blocked too, which is what a real
+  drop looks like (the peer never sees the `done`). The resume integration
+  test drives two sessions, each with its own store (sender and receiver
+  are separate tabs) over one staging disk: drop after two chunks, re-pair,
+  and the file completes from the parked offset with exactly one chunk
+  re-crossing the wire, byte-identical. Still roadmap: auto-reconnect
+  _within_ a session, and the bitmap/hash tree for partial repair.

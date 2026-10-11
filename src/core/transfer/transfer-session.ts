@@ -1,12 +1,14 @@
 import { DropbeamError, type ErrorCode } from "../errors";
 import type { ChannelLike } from "./channel";
-import { PROTOCOL_VERSION } from "./protocol";
+import { PROTOCOL_VERSION, type ResumedFile } from "./protocol";
 import { Receiver, type IncomingOffer, type IncomingText } from "./receiver";
 import { Sender } from "./sender";
 import type { FilePhase } from "./phase";
 import { createSinkFor } from "../storage/select-sink";
 import { sanitizeFilename } from "../storage/filename";
-import type { SaveResult, Sink } from "../storage/sink";
+import { resumeStore, type ResumeStore } from "./resume-store";
+import type { SaveResult, Sink, SinkMeta } from "../storage/sink";
+import { OpfsSink } from "../storage/opfs-sink";
 
 /**
  * Binds an open data channel to both halves of the transfer engine (PRD 8.4,
@@ -15,7 +17,8 @@ import type { SaveResult, Sink } from "../storage/sink";
  * incoming file by feature detection.
  *
  * `fidParity` separates directions so `{fid}` control messages can never be
- * ambiguous: the handshake offerer uses odd fids, the answerer even.
+ * ambiguous: the host (parity 1) allocates even fids, the guest (parity 0)
+ * odd.
  */
 
 export type FileProgress = {
@@ -46,15 +49,23 @@ export type TransferSessionOptions = {
   autoAccept?: boolean;
   /** Destination picker for File System Access; must run in a user gesture. */
   pickDestination?: (name: string) => Promise<Sink>;
+  /** Sink factory override (tests inject an in-memory staging disk). */
+  createSink?: (meta: SinkMeta) => Sink | Promise<Sink>;
+  /** Resume-sink factory override (same seam, for the parked-offset path). */
+  resumeSink?: (meta: SinkMeta, resumeFromBytes: number) => Sink | Promise<Sink>;
+  /** Parked-transfer state (injectable for tests). */
+  store?: ResumeStore;
 };
 
 export class TransferSession {
   private readonly sender: Sender;
   private readonly receiver: Receiver;
   private readonly files = new Map<number, FileProgress>();
+  private readonly store: ResumeStore;
 
   constructor(private readonly opts: TransferSessionOptions) {
     const events = opts.events ?? {};
+    this.store = opts.store ?? resumeStore;
     const track = (fid: number, name: string, size: number) => {
       if (!this.files.has(fid)) this.files.set(fid, { fid, name, size, phase: "QUEUED", done: 0 });
       return this.files.get(fid)!;
@@ -75,8 +86,10 @@ export class TransferSession {
           events.onProgress?.({ ...file });
         },
         onError: (fid, code) => events.onError?.(code, fid),
+        onResumable: (peer) => this.reofferParked(peer),
       },
       opts.fidParity ?? 0,
+      this.store,
     );
 
     this.receiver = new Receiver(
@@ -112,9 +125,49 @@ export class TransferSession {
       },
       {
         autoAccept: opts.autoAccept ?? false,
-        createSink: (meta) => createSinkFor(sanitizeFilename(meta.name), this.opts.pickDestination),
+        store: this.store,
+        createSink:
+          opts.createSink ??
+          ((meta) => createSinkFor(sanitizeFilename(meta.name), this.opts.pickDestination)),
+        // Resumable only where the staged bytes survive the session: OPFS
+        // (Firefox/Safari, Chromium without a picker). A memory sink's bytes
+        // are gone with the page, so those files simply start over.
+        resumeSink:
+          opts.resumeSink ??
+          (async (meta, resumeFromBytes) => {
+            const picker = (globalThis as { showSaveFilePicker?: unknown }).showSaveFilePicker;
+            const opfs = typeof navigator.storage?.getDirectory === "function" && picker == null;
+            if (!opfs) throw new DropbeamError("SINK_UNAVAILABLE", "this sink cannot resume");
+            return OpfsSink.resume(meta.name, resumeFromBytes);
+          }),
       },
     );
+  }
+
+  /**
+   * Re-offer files this side was streaming when the channel dropped, from
+   * the offset the peer says it already holds (roadmap: resumable
+   * transfers). Runs after `hello`, before the user picks new files.
+   */
+  private reofferParked(peer: ResumedFile[]): void {
+    const files: { blob: Blob; name: string; type: string; path?: string }[] = [];
+    const resumeChunks: number[] = [];
+    for (const announced of peer) {
+      const parked = this.store.outboundFor(announced.name, announced.size);
+      if (!parked || announced.chunks <= 0) continue;
+      files.push({
+        blob: parked.blob,
+        name: parked.name,
+        type: parked.type,
+        ...(parked.path ? { path: parked.path } : {}),
+      });
+      resumeChunks.push(announced.chunks);
+      this.store.takeOutbound(announced.name, announced.size);
+    }
+    if (files.length === 0) return;
+    void this.sender.sendFiles(files, resumeChunks).catch(() => {
+      // A failed resume leaves the original state: the user can re-offer.
+    });
   }
 
   /** Announce this device and its capabilities (PRD 8.4 `hello`). */
@@ -127,6 +180,10 @@ export class TransferSession {
         caps: { fsa: false, opfs: false },
       }),
     );
+    // Roadmap (resumable transfers): announce the partials a previous,
+    // dropped session left behind, so the peer re-offers them instead of
+    // starting over.
+    this.receiver.announceResumable();
   }
 
   /** FR-10: offer files; resolves once every accepted file is verified. */
@@ -144,7 +201,9 @@ export class TransferSession {
       type: f.type || f.blob.type || "application/octet-stream",
     }));
     // Sender allocates fids as `parity + 1 + index * 2` (see Sender.allocFid),
-    // so the names are known up front and progress rows can show them.
+    // so the names are known up front and progress rows can show them. The
+    // blobs themselves stay in the Sender's in-flight set: a dropped channel
+    // parks them there, and a re-paired session re-offers them (resume).
     const parity = this.opts.fidParity ?? 0;
     safe.forEach((f, index) => this.track(parity + 1 + index * 2, f.name, f.blob.size));
     try {

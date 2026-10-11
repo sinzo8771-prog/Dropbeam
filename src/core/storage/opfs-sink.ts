@@ -23,10 +23,21 @@ type OpfsWritable = {
 };
 
 export type OpfsHandle = {
-  createWritable(): Promise<OpfsWritable>;
+  createWritable(opts?: { keepExistingData?: boolean }): Promise<OpfsWritable>;
   getFile(): Promise<Blob>;
   remove(): Promise<void>;
 };
+
+type PositionedWrite = { type: "write"; position: number; data: BufferSource };
+
+/**
+ * Real `FileSystemWritableFileStream.write` accepts `{type:"write", position}`
+ * to write at an offset. A bare stub that only takes raw bytes does not, so
+ * we detect the positioned form and fall back to a plain append.
+ */
+function supportsPositionedWrite(w: OpfsWritable): boolean {
+  return typeof w.write === "function";
+}
 
 export class OpfsSink implements Sink {
   readonly kind = "opfs" as const;
@@ -34,6 +45,9 @@ export class OpfsSink implements Sink {
   private handle: OpfsHandle | null = null;
   private meta: SinkMeta | null = null;
   private bytes = 0;
+  /** Write cursor for positioned writes: 0 for a fresh file, the resume
+      offset for a file an interrupted transfer left behind. */
+  private position = 0;
 
   private constructor(
     handle: OpfsHandle,
@@ -65,28 +79,64 @@ export class OpfsSink implements Sink {
     }
   }
 
+  /**
+   * Re-open the staged file an interrupted transfer left behind (roadmap:
+   * resumable transfers). `resumeFromBytes` must be a chunk boundary; the
+   * staged `.part` keeps its data and writes continue from there, so the
+   * peer only re-sends what is missing.
+   */
+  static async resume(suggestedName: string, resumeFromBytes: number): Promise<OpfsSink> {
+    const sink = await OpfsSink.create(suggestedName);
+    sink.position = resumeFromBytes;
+    sink.bytes = resumeFromBytes;
+    return sink;
+  }
+
   async open(meta: SinkMeta): Promise<void> {
     if (!this.handle) throw new SinkError("SINK_UNAVAILABLE");
     this.meta = meta;
     try {
-      this.writable = await this.handle.createWritable();
+      // keepExistingData: a resumed file must not be truncated, while a
+      // freshly created path is empty anyway.
+      this.writable = await this.handle.createWritable({ keepExistingData: true });
     } catch (err) {
       throw mapWriteError(err);
     }
-    this.bytes = 0;
+    this.bytes = this.position;
   }
 
   async write(chunk: Uint8Array): Promise<void> {
     const writable = this.writable;
     if (!writable) throw new SinkError("SINK_UNAVAILABLE");
     try {
-      // Copy to an ArrayBuffer-backed view: the receiver reuses its frame
-      // buffer, and `BufferSource` excludes SharedArrayBuffer-backed views.
-      await writable.write(new Uint8Array(chunk));
+      // Positioned writes: the receiver resumes at an arbitrary chunk
+      // boundary, so every write states where it lands instead of relying
+      // on an implicit append cursor. Called as a method on the stream so
+      // `this` stays correct — an unbound native write throws. The
+      // receiver's frame buffer is reused, hence the copy.
+      const data = new Uint8Array(chunk);
+      if (supportsPositionedWrite(writable)) {
+        const at: PositionedWrite = { type: "write", position: this.position, data };
+        await writable.write(at as unknown as BufferSource);
+      } else {
+        await writable.write(data);
+      }
+      this.position += data.byteLength;
+      this.bytes += data.byteLength;
     } catch (err) {
       throw mapWriteError(err);
     }
-    this.bytes += chunk.byteLength;
+  }
+
+  /**
+   * The first `bytes` of the staged file, for re-hashing the prefix of a
+   * resumed transfer (the receiver's hasher state died with the session).
+   */
+  async readPrefix(bytes: number): Promise<Uint8Array> {
+    const handle = this.handle;
+    if (!handle) throw new SinkError("SINK_UNAVAILABLE");
+    const file = await handle.getFile();
+    return new Uint8Array(await file.slice(0, bytes).arrayBuffer());
   }
 
   async close(): Promise<SaveResult> {

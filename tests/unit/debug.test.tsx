@@ -1,7 +1,12 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/preact";
-import { DebugGesture, DebugPanel, TAP_WINDOW_MS, type DebugSessionMetrics } from "../../src/ui/debug";
+import {
+  DebugGesture,
+  DebugPanel,
+  TAP_WINDOW_MS,
+  type DebugSessionMetrics,
+} from "../../src/ui/debug";
 import { translatorFor } from "../../src/core/platform/i18n";
 
 afterEach(cleanup);
@@ -89,9 +94,7 @@ describe("DebugPanel (FR-50)", () => {
     });
 
     expect(container.querySelector(".debug-panel")?.getAttribute("role")).toBe("region");
-    expect(container.querySelector(".debug-panel")?.getAttribute("aria-label")).toBe(
-      "Debug panel",
-    );
+    expect(container.querySelector(".debug-panel")?.getAttribute("aria-label")).toBe("Debug panel");
 
     // The build id row carries no health flag: it is a fact, not a status.
     expect(row(container, "Build id")).toEqual({

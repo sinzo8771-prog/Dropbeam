@@ -6,6 +6,8 @@ import type { ChannelLike } from "./channel";
 import { createHasher, type Hasher } from "./hash";
 import type { FilePhase } from "./phase";
 import {
+  CHUNK_SIZE,
+  chunkOffset,
   decodeControl,
   decodeDataFrame,
   encodeControl,
@@ -14,7 +16,9 @@ import {
   type DataChunk,
   type OfferedFile,
   type PeerCaps,
+  type ResumedFile,
 } from "./protocol";
+import { resumeStore, type ParkedInbound, type ResumeStore } from "./resume-store";
 
 export type IncomingOffer = { id: string; files: OfferedFile[]; totalSize: number };
 export type IncomingText = { id: string; body: string };
@@ -35,6 +39,12 @@ export type ReceiverEvents = {
 export type ReceiverOptions = {
   /** Sink factory; defaults to MemorySink (PRD 8.5 selection lives in core/storage). */
   createSink?: (meta: SinkMeta) => Sink | Promise<Sink>;
+  /**
+   * Sink factory for a file an interrupted transfer left behind. Resuming
+   * keeps the staged bytes and writes at the parked offset; implementations
+   * that cannot (memory) simply do not resume.
+   */
+  resumeSink?: (meta: SinkMeta, resumeFromBytes: number) => Sink | Promise<Sink>;
   /** FR-13: auto-accept incoming offers for this session. */
   autoAccept?: boolean;
   /** Start the ping/pong heartbeat (PRD 8.4). */
@@ -42,6 +52,8 @@ export type ReceiverOptions = {
   /** Heartbeat tuning (tests use short values; production uses PRD defaults). */
   pingIntervalMs?: number;
   pongTimeoutMs?: number;
+  /** Where parked partials live across a dropped channel (injectable for tests). */
+  store?: ResumeStore;
 };
 
 type RxState = {
@@ -54,6 +66,8 @@ type RxState = {
   phase: FilePhase;
   chain: Promise<void>;
   canceled: boolean;
+  /** True when this state continues a parked partial (never prompt for it). */
+  resumed: boolean;
 };
 
 export class Receiver {
@@ -65,6 +79,7 @@ export class Receiver {
   private disposed = false;
   private readonly pingIntervalMs: number;
   private readonly pongTimeoutMs: number;
+  private readonly store: ResumeStore;
 
   constructor(
     private readonly channel: ChannelLike,
@@ -74,11 +89,25 @@ export class Receiver {
     this.autoAccept = opts.autoAccept ?? false;
     this.pingIntervalMs = opts.pingIntervalMs ?? PING_INTERVAL_MS;
     this.pongTimeoutMs = opts.pongTimeoutMs ?? PONG_TIMEOUT_MS;
+    this.store = opts.store ?? resumeStore;
     this.channel.addEventListener("message", this.onMessage);
     if (opts.heartbeat !== false) {
       this.heartbeatTimer = setInterval(() => this.checkHeartbeat(), this.pingIntervalMs);
       this.channel.send(encodeControl({ k: "ping" }));
     }
+  }
+
+  /**
+   * Announce the partials this side still holds (roadmap: resumable
+   * transfers). Called once the channel is usable, right after `hello`, so
+   * the peer can re-offer those files instead of starting over.
+   */
+  announceResumable(): void {
+    const files: ResumedFile[] = this.store
+      .inboundList()
+      .map((p) => ({ fid: p.fid, name: p.name, size: p.size, chunks: p.chunks }));
+    if (files.length === 0) return;
+    this.channel.send(encodeControl({ k: "resume", files }));
   }
 
   setAutoAccept(value: boolean): void {
@@ -132,8 +161,12 @@ export class Receiver {
         break;
       case "offer": {
         this.offer = { id: msg.id, files: msg.files, totalSize: msg.totalSize };
-        if (this.autoAccept) void this.accept(msg.id);
-        else this.events.onOffer?.(this.offer);
+        // Files the peer re-offers from a resume point continue a parked
+        // partial: the user already approved them once, so they never
+        // prompt again (FR-13 applies to new files).
+        const fresh = msg.files.filter((f) => !this.parkedFor(f));
+        if (this.autoAccept || fresh.length === 0) void this.accept(msg.id);
+        else this.events.onOffer?.({ id: msg.id, files: fresh, totalSize: msg.totalSize });
         break;
       }
       case "done":
@@ -159,6 +192,10 @@ export class Receiver {
       default:
         break; // accept/decline/ok/err are handled by Sender
     }
+  }
+
+  private parkedFor(file: OfferedFile): ParkedInbound | undefined {
+    return file.chunks !== undefined ? this.store.inboundFor(file.name, file.size) : undefined;
   }
 
   private onFrame(frame: DataChunk): void {
@@ -263,7 +300,25 @@ export class Receiver {
 
     const safeName = sanitizeFilename(meta.name);
     const sinkMeta: SinkMeta = { name: safeName, size: meta.size, type: meta.type };
-    const sink = this.opts.createSink ? await this.opts.createSink(sinkMeta) : new MemorySink();
+
+    // Resume: the peer re-offered a file we already hold a prefix of. The
+    // staged bytes stay on disk and only the missing chunks are written, so
+    // the parked partial's chunk count is where the stream continues.
+    const parked = this.parkedFor(meta);
+    const chunks = parked?.chunks ?? meta.chunks ?? 0;
+    const resuming = chunks > 0;
+    if (resuming && !this.opts.resumeSink) {
+      // No resume path for this receiver (memory sink, or a test double):
+      // start the file over rather than corrupting the partial.
+      this.store.takeInbound(meta.name, meta.size);
+      this.events.onError?.(meta.fid, "SINK_UNAVAILABLE");
+      throw new DropbeamError("SINK_UNAVAILABLE", "cannot resume this file");
+    }
+    const sink = resuming
+      ? await this.opts.resumeSink!(sinkMeta, chunkOffset(chunks))
+      : this.opts.createSink
+        ? await this.opts.createSink(sinkMeta)
+        : new MemorySink();
     try {
       await sink.open(sinkMeta);
     } catch (err) {
@@ -274,18 +329,50 @@ export class Receiver {
       throw err instanceof DropbeamError ? err : new DropbeamError(code);
     }
     const hasher = await createHasher();
+    if (resuming) {
+      // The hasher state died with the previous session, so re-hash the
+      // parked prefix from the staged bytes before appending.
+      const prefix = await (sink as Sink).readPrefix?.(chunkOffset(chunks));
+      if (prefix && prefix.byteLength > 0) hasher.update(prefix);
+    }
+    this.store.takeInbound(meta.name, meta.size);
     this.active.set(meta.fid, {
       fid: meta.fid,
       meta: { ...meta, name: safeName },
       sink,
       hasher,
-      expectedSeq: 0,
-      received: 0,
+      expectedSeq: chunks,
+      received: chunkOffset(chunks),
       phase: "ACCEPTED",
       chain: Promise.resolve(),
       canceled: false,
+      resumed: resuming,
     });
+    // The row starts at the resumed offset, not from zero, so the user sees
+    // the transfer continuing rather than restarting.
+    this.events.onProgress?.(meta.fid, chunkOffset(chunks), meta.size);
     this.events.onPhase?.(meta.fid, "ACCEPTED");
+  }
+
+  /**
+   * Park what was in flight so a re-paired session can resume it (roadmap:
+   * resumable transfers). Called when the channel goes away: the staged
+   * bytes stay where the sink put them, and only disk-backed sinks are
+   * worth announcing — a memory sink's bytes are already gone.
+   */
+  private parkActive(): void {
+    for (const st of this.active.values()) {
+      if (st.canceled) continue;
+      const chunks = Math.floor(st.received / CHUNK_SIZE);
+      if (chunks <= 0) continue;
+      this.store.parkInbound({
+        fid: st.fid,
+        name: st.meta.name,
+        size: st.meta.size,
+        chunks,
+        sink: st.sink.kind,
+      });
+    }
   }
 
   /** FR-16: cancel a file we are receiving. */
@@ -314,8 +401,11 @@ export class Receiver {
     this.disposed = true;
     this.stopHeartbeat();
     this.channel.removeEventListener("message", this.onMessage);
+    // The channel is gone: park what was in flight (the sink keeps its
+    // staged bytes on disk) instead of aborting, so a re-paired session can
+    // resume exactly where it stopped.
+    this.parkActive();
     for (const st of this.active.values()) {
-      void st.sink.abort();
       st.hasher.dispose();
     }
     this.active.clear();
