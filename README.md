@@ -77,11 +77,20 @@ the hotspot trick and the browser support table.
 
 ## Status
 
-Milestones M0–M7 are complete and gated by `npm run ci`. What remains for
-`v1.0` (M8): the **physical-device interop matrix**
-([docs/INTEROP.md](docs/INTEROP.md)) — the two-browser e2e suite already
-covers pairing, verification, approval, a two-way transfer and the
-peer-drop path against the production build — and tagging the release.
-The demo animation above is recorded by `node scripts/record-demo.mjs`
-(needs a `vite preview` server on :4199). A hidden diagnostic panel ships
-for field debugging: tap eight times on the right edge of the screen.
+`v1.0`. Milestones M0–M8 are complete and gated by `npm run ci`: pairing,
+verification, approval, two-way transfers, the settings sheet, the PWA
+shell, and the release audit are all covered by 266 unit/integration and
+10 e2e tests, plus the documented manual matrix.
+
+The automated half of the [interop matrix](docs/INTEROP.md) runs **real
+engines** — Chromium ↔ Chromium, Chromium ↔ Firefox in both directions,
+with real WebRTC over the paste route. What is deliberately _not_
+automated, and is listed there as field QA: the camera QR route, real
+Wi-Fi / hotspot / guest-network behaviour, real Safari (Playwright's
+Windows WebKit build has no WebRTC), and mobile power/screen behaviour.
+
+The demo animation above is recorded by `node scripts/record-demo.mjs`;
+`node scripts/interop-matrix.mjs` re-runs the cross-engine rows and
+`node scripts/audit-release.mjs` re-runs the Lighthouse and network
+audits. A hidden diagnostic panel ships for field debugging: tap eight
+times on the right edge of the screen.
