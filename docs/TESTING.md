@@ -36,7 +36,10 @@ included — re-pairs, and proves the receiver's parked offset continues with
 exactly the missing chunk re-crossing the wire and the file verifying
 byte-identical; it also pins that memory sinks start over (with a fresh
 prompt), that a clean transfer leaves nothing parked, and that `chunks` past
-the end of a file are rejected on the wire (PRD 9.4).
+the end of a file are rejected on the wire (PRD 9.4). The heartbeat suite in
+`transfer.test.ts` pins `PEER_LOST` at the plain pong timeout and the
+recoverable-drop grace: while the wired `pcState` reads `disconnected` the
+deadline doubles, and `failed` / `closed` still fail at the plain one.
 
 ## End-to-end (`tests/e2e`)
 

@@ -58,6 +58,12 @@ export type UseTransferOptions = {
   autoAccept?: boolean;
   /** Odd fids for the offerer, even for the answerer, so they never collide. */
   fidParity?: 0 | 1;
+  /**
+   * Live `RTCPeerConnection.connectionState` for the session. While it reads
+   * `disconnected` the browser is still re-establishing ICE, so the receiver's
+   * heartbeat grants a bounded recovery grace instead of declaring PEER_LOST.
+   */
+  pcState?: () => RTCPeerConnectionState | undefined;
 };
 
 /** Merge an event's snapshot into the list, keyed by fid, preserving order. */
@@ -97,6 +103,7 @@ export function useTransfer(opts: UseTransferOptions): UseTransfer {
       deviceName,
       autoAccept,
       fidParity,
+      pcState: opts.pcState,
       events: {
         onPhase: (file) => setFiles((prev) => upsert(prev, file)),
         onProgress: (file) => setFiles((prev) => upsert(prev, file)),

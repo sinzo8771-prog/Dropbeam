@@ -102,7 +102,7 @@ Roles are about the handshake only; after connecting, both can send.
 
 - Send more files any time while the channel is open.
 - "New connection" resets cleanly.
-- If the channel drops, show Reconnect (requires a new handshake in v1; auto-resume is roadmap).
+- If the channel drops, show Reconnect (requires a new handshake in v1; a `disconnected` ICE blip is absorbed by the heartbeat's grace window, and full auto-resume is roadmap).
 
 ---
 
@@ -487,19 +487,19 @@ Impeccable is a design skill pack for AI coding agents (commands include `init`,
 
 ## 12. Error handling
 
-| Code                 | Meaning                | User message                                                          | Action                 |
-| -------------------- | ---------------------- | --------------------------------------------------------------------- | ---------------------- |
-| `CAMERA_DENIED`      | Permission denied      | "Camera blocked. Paste the code instead or allow camera in settings." | Show paste UI          |
-| `CODE_INVALID`       | Not a Dropbeam code    | "That doesn't look like a Dropbeam code."                             | Rescan                 |
-| `CODE_EXPIRED`       | `ts` older than 10 min | "This code expired. Start again."                                     | Back to IDLE           |
-| `ICE_GATHER_TIMEOUT` | No candidates          | "Couldn't find a network path. Check Wi-Fi."                          | Retry                  |
-| `CONNECT_TIMEOUT`    | No channel in 20 s     | "Couldn't connect. Same Wi-Fi? Try hotspot or Across networks."       | Troubleshoot link      |
-| `PEER_LOST`          | Heartbeat missed 15 s  | "Connection lost."                                                    | Offer reconnect        |
-| `HASH_MISMATCH`      | Integrity failure      | "File arrived damaged. Try sending again."                            | Retry file             |
-| `SEQ_GAP`            | Missing chunk          | "Transfer interrupted."                                               | Retry file             |
-| `SINK_UNAVAILABLE`   | No safe place to store | "Your browser can't save files this big."                             | Suggest Chrome desktop |
-| `DISK_FULL`          | Write failed           | "Not enough storage."                                                 | Cancel file            |
-| `UNSUPPORTED`        | Missing WebRTC/Streams | "This browser can't do direct transfers."                             | Show supported list    |
+| Code                 | Meaning                                                                | User message                                                          | Action                 |
+| -------------------- | ---------------------------------------------------------------------- | --------------------------------------------------------------------- | ---------------------- |
+| `CAMERA_DENIED`      | Permission denied                                                      | "Camera blocked. Paste the code instead or allow camera in settings." | Show paste UI          |
+| `CODE_INVALID`       | Not a Dropbeam code                                                    | "That doesn't look like a Dropbeam code."                             | Rescan                 |
+| `CODE_EXPIRED`       | `ts` older than 10 min                                                 | "This code expired. Start again."                                     | Back to IDLE           |
+| `ICE_GATHER_TIMEOUT` | No candidates                                                          | "Couldn't find a network path. Check Wi-Fi."                          | Retry                  |
+| `CONNECT_TIMEOUT`    | No channel in 20 s                                                     | "Couldn't connect. Same Wi-Fi? Try hotspot or Across networks."       | Troubleshoot link      |
+| `PEER_LOST`          | Heartbeat missed 15 s (30 s while `connectionState` is `disconnected`) | "Connection lost."                                                    | Offer reconnect        |
+| `HASH_MISMATCH`      | Integrity failure                                                      | "File arrived damaged. Try sending again."                            | Retry file             |
+| `SEQ_GAP`            | Missing chunk                                                          | "Transfer interrupted."                                               | Retry file             |
+| `SINK_UNAVAILABLE`   | No safe place to store                                                 | "Your browser can't save files this big."                             | Suggest Chrome desktop |
+| `DISK_FULL`          | Write failed                                                           | "Not enough storage."                                                 | Cancel file            |
+| `UNSUPPORTED`        | Missing WebRTC/Streams                                                 | "This browser can't do direct transfers."                             | Show supported list    |
 
 ---
 
@@ -616,7 +616,7 @@ Full manual device matrix, fix bugs, write `INTEROP.md`, README with GIF demo, t
 
 ## 19. Roadmap (post v1, do not build now)
 
-- Resumable transfers: shipped for the re-pair case (chunk offset, whole-file hash; see DECISIONS 2026-10-11). The chunk bitmap / hash tree for per-chunk repair, and auto-reconnect _within_ a session, remain roadmap.
+- Resumable transfers: shipped for the re-pair case (chunk offset, whole-file hash; see DECISIONS 2026-10-11). Recoverable-drop grace (heartbeat waits out a `disconnected` ICE blip) shipped the same day; see DECISIONS 2026-10-11. The chunk bitmap / hash tree for per-chunk repair, and a full auto-reconnect _within_ a session (no user re-pair), remain roadmap.
 - Multi-peer rooms (mesh) and one-to-many broadcast.
 - Optional tiny signaling relay (e.g. a free Worker) for **short numeric pairing codes**, still no file relay; strictly opt-in.
 - Optional TURN guidance for self-hosters.

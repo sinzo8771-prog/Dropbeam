@@ -649,5 +649,43 @@ chunks}]}`, announced by the receiver right after `hello`. The sender
   test drives two sessions, each with its own store (sender and receiver
   are separate tabs) over one staging disk: drop after two chunks, re-pair,
   and the file completes from the parked offset with exactly one chunk
-  re-crossing the wire, byte-identical. Still roadmap: auto-reconnect
-  _within_ a session, and the bitmap/hash tree for partial repair.
+  re-crossing the wire, byte-identical. Still roadmap: the bitmap/hash
+  tree for partial repair of a completed-but-corrupt file.
+
+---
+
+## 2026-10-11 · Recoverable-drop grace: heartbeat waits out a self-healing ICE blip (§19)
+
+First slice of the roadmap's "auto-reconnect _within_ a session". A full
+re-pair still needs a new handshake (PRD 5.1) and is unchanged; this
+guards the narrower case where the link was never really gone.
+
+- **Problem:** the receiver's heartbeat fires `PEER_LOST` after one pong
+  timeout (15 s in production). `RTCPeerConnection.connectionState` can
+  read `disconnected` for a few seconds while the browser re-establishes
+  ICE on its own — a transient blip. During that window the sender is
+  simply quiet (it has no ping/pong handler), so the receiver counted
+  silence as loss and forced a re-pair the link was about to undo.
+- **Choice:** the heartbeat consults a live `pcState` callback
+  (`() => peerSessionRef.current?.connectionState`, read at call time
+  through the stable ref). When it reads `disconnected`, the pong
+  deadline doubles (15 s + 15 s = 30 s in production); every other state
+  (`connected` but silent, `failed`, `closed`, or no callback wired) is
+  a real loss at the plain deadline. The grace is derived from
+  `pongTimeoutMs`, not a new knob, so tests tighten the real constant
+  and a separate `recoveryGraceMs` cannot drift from it.
+- **Reason:** `readyState === "open"` on the `DataChannel` is the
+  normal state, so deriving recovery from the channel alone would grant
+  grace always; ICE recovery is only observable from the
+  `RTCPeerConnection`. `failed`/`closed` get no grace because the
+  browser has already given up and `peer-session` tears the PC down on
+  either. Grace is deliberately bounded at 2× so a genuinely dead peer
+  is still reported in ≤30 s (PRD 12's PEER_LOST contract holds, only
+  the recovering case stretches).
+- **Cost:** three integration tests pin the behaviour — grace holds
+  `PEER_LOST` while `disconnected`, `failed` and `closed` still fail at
+  the plain deadline. Plumbing (`pcState` through `TransferSession` and
+  `useTransfer`) cost 179 B gz against a ~105 B effective budget, so it
+  was paid for by dropping the separate grace knob and inlining the
+  App-side getter (a `PeerSession.connectionState` getter measured
+  12 B worse than reading the existing ref, and was removed).

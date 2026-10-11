@@ -28,6 +28,7 @@ function makeHarness(
     heartbeat?: boolean;
     pingIntervalMs?: number;
     pongTimeoutMs?: number;
+    pcState?: () => RTCPeerConnectionState | undefined;
   } = {},
 ): Harness {
   const [txChannel, rxChannel] = MemoryChannel.pair(opts.channel ?? {});
@@ -57,6 +58,7 @@ function makeHarness(
       heartbeat: opts.heartbeat ?? false,
       ...(opts.pingIntervalMs !== undefined ? { pingIntervalMs: opts.pingIntervalMs } : {}),
       ...(opts.pongTimeoutMs !== undefined ? { pongTimeoutMs: opts.pongTimeoutMs } : {}),
+      ...(opts.pcState !== undefined ? { pcState: opts.pcState } : {}),
     },
   );
   h.sender = new Sender(
@@ -278,4 +280,52 @@ describe("heartbeat (PRD 8.4)", () => {
       timeoutMs: 2000,
     });
   });
+
+  it("holds off PEER_LOST while the connection is only 'disconnected' (recovering)", async () => {
+    const h = makeHarness({
+      heartbeat: true,
+      pingIntervalMs: 10,
+      // Grace is 2× the pong timeout while recovering; 200 ms covers the 150 ms
+      // we wait below, so silence is expected mid-recovery.
+      pongTimeoutMs: 100,
+      pcState: () => "disconnected",
+    });
+    // Sit well past the pong timeout: silence is expected mid-recovery, so
+    // the heartbeat must keep the session alive rather than drop it.
+    await new Promise((r) => setTimeout(r, 150));
+    expect(h.errors.some((e) => e.code === "PEER_LOST")).toBe(false);
+  });
+
+  it("gives up once the recovery grace elapses even while still 'disconnected'", async () => {
+    const h = makeHarness({
+      heartbeat: true,
+      pingIntervalMs: 10,
+      // 2× grace = 40 ms; past that the link is treated as lost regardless.
+      pongTimeoutMs: 20,
+      pcState: () => "disconnected",
+    });
+    await waitFor(() => h.errors.some((e) => e.code === "PEER_LOST"), {
+      label: "grace-capped peer lost",
+      timeoutMs: 2000,
+    });
+  });
+
+  it.each(["failed", "closed"] as const)(
+    "declares PEER_LOST at the pong timeout when the connection is '%s' (no grace)",
+    async (state) => {
+      const h = makeHarness({
+        heartbeat: true,
+        pingIntervalMs: 10,
+        // No grace for failed/closed: only the plain pong timeout applies, so a
+        // 2× window would keep the session alive past our wait if it were
+        // wrongly granted — proving it is not.
+        pongTimeoutMs: 30,
+        pcState: () => state,
+      });
+      await waitFor(() => h.errors.some((e) => e.code === "PEER_LOST"), {
+        label: `${state} peer lost`,
+        timeoutMs: 2000,
+      });
+    },
+  );
 });

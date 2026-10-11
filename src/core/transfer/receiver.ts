@@ -52,6 +52,14 @@ export type ReceiverOptions = {
   /** Heartbeat tuning (tests use short values; production uses PRD defaults). */
   pingIntervalMs?: number;
   pongTimeoutMs?: number;
+  /**
+   * Live `RTCPeerConnection.connectionState` for this session (PRD: a dropped
+   * connection ends the session). While it reads `disconnected` the browser is
+   * still re-establishing ICE, so heartbeat silence is expected mid-recovery
+   * and we hold off on PEER_LOST for a bounded grace window instead of
+   * forcing a re-pair the link was about to undo on its own.
+   */
+  pcState?: () => RTCPeerConnectionState | undefined;
   /** Where parked partials live across a dropped channel (injectable for tests). */
   store?: ResumeStore;
 };
@@ -116,13 +124,20 @@ export class Receiver {
 
   private checkHeartbeat(): void {
     if (this.disposed) return;
-    if (Date.now() - this.lastSeen > this.pongTimeoutMs) {
-      this.stopHeartbeat();
-      this.events.onError?.(null, "PEER_LOST");
-      this.events.onPeerLost?.();
+    const silent = Date.now() - this.lastSeen;
+    // A `disconnected` connection is still re-establishing ICE on its own, so
+    // heartbeat silence is expected mid-recovery: double the deadline instead
+    // of forcing a re-pair the link was about to undo. Anything else
+    // (`connected` but silent, `failed`, `closed`, or no state wired) is a
+    // real loss at the plain pong timeout.
+    const recovering = this.opts.pcState?.() === "disconnected";
+    if (silent <= this.pongTimeoutMs * (recovering ? 2 : 1)) {
+      this.channel.send(encodeControl({ k: "ping" }));
       return;
     }
-    this.channel.send(encodeControl({ k: "ping" }));
+    this.stopHeartbeat();
+    this.events.onError?.(null, "PEER_LOST");
+    this.events.onPeerLost?.();
   }
 
   private stopHeartbeat(): void {

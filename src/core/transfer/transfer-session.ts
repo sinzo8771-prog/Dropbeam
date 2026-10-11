@@ -55,6 +55,12 @@ export type TransferSessionOptions = {
   resumeSink?: (meta: SinkMeta, resumeFromBytes: number) => Sink | Promise<Sink>;
   /** Parked-transfer state (injectable for tests). */
   store?: ResumeStore;
+  /**
+   * Live `RTCPeerConnection.connectionState` for this session. While it reads
+   * `disconnected` the browser is still re-establishing ICE, so the receiver's
+   * heartbeat grants a bounded recovery grace instead of declaring PEER_LOST.
+   */
+  pcState?: () => RTCPeerConnectionState | undefined;
 };
 
 export class TransferSession {
@@ -126,6 +132,7 @@ export class TransferSession {
       {
         autoAccept: opts.autoAccept ?? false,
         store: this.store,
+        pcState: opts.pcState,
         createSink:
           opts.createSink ??
           ((meta) => createSinkFor(sanitizeFilename(meta.name), this.opts.pickDestination)),
