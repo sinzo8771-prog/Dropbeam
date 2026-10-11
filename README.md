@@ -50,8 +50,10 @@ Individual scripts: `npm run test` (Vitest), `npm run test:e2e` (Playwright),
 `npm run size` (gzip budget), `npm run pwa:health` (installability probe).
 
 Current gate: 275 tests green (265 unit/integration + 10 e2e), initial JS
-~147.0 KB gz against a 153.6 KB budget, Lighthouse mobile **99 / 100 / 100**
-(Performance / Accessibility / PWA).
+~147.0 KB gz against a 153.6 KB budget, Lighthouse mobile **99 / 100 / 100 /
+100** (Performance / Accessibility / Best practices / SEO), and a network audit
+over a real pairing + transfer showing only same-origin requests. Both checks
+are reproducible with `node scripts/audit-release.mjs` against `vite preview`.
 
 ## Using it
 

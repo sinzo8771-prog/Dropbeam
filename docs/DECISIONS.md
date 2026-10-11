@@ -499,3 +499,36 @@ library's docs gets an entry here (PRD section 0.3).
   note, and assert zero console errors), and the settings flow is covered
   end-to-end including persistence across reload (FR-40 key list asserted
   from `localStorage`).
+
+---
+
+## 2026-10-10 — Linux CI failure, release audit, robots.txt
+
+- **Problem:** CI had been red since the previous M8 commit — the share
+  staging test failed only on Linux (`expected '[object Blob]'`): Node 22
+  exposes jsdom's `File` while the cached `Response` is Node's own, so
+  jsdom's `Blob` stringified the foreign-realm blob part instead of
+  unwrapping it. Locally (Node 24) both come from one realm, hiding it.
+- **Choice:** `readStagedShare` reads the entry as bytes and builds the
+  `File` from the `ArrayBuffer` — a `BufferSource` part is copied as bytes
+  by any spec-compliant `Blob`/`File`, whatever realm produced it.
+- **Reason:** The pattern was fragile by construction; fixing the
+  implementation is safer than loosening the fake, and it removes an
+  intermediate object.
+- **Release audit** (`scripts/audit-release.mjs`, run against the
+  production build): Lighthouse mobile **99 performance / 100
+  accessibility / 100 best practices / 100 SEO**. Lighthouse 12 removed
+  the PWA category, so installability is proven directly: Chromium's
+  `Page.getInstallabilityErrors` returns an empty list (valid manifest,
+  active fetch-handling service worker, 192/512 icons), `npm run
+pwa:health` is green, and the FR-50 e2e asserts the worker controls the
+  page with a primed cache. The promotional `beforeinstallprompt` event
+  does not fire in automation regardless of engagement — Chromium
+  withholds it from low-engagement profiles — which is why the audit
+  checks the criteria instead.
+- **Also:** a network audit of a full pairing + transfer (two browser
+  contexts, real loopback WebRTC, file and note in both directions) shows
+  14 requests, **all same-origin** — DoD 5 with STUN off. `public/robots.txt`
+  was added as the conventional `Allow: /` after the first attempt
+  (`Disallow: /`) _lowered_ the Lighthouse SEO score: Lighthouse treats a
+  page blocked from indexing as a failure, not a pass.

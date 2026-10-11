@@ -52,3 +52,12 @@ stamped build id in place:
 
 Recorded in `docs/INTEROP.md` (PRD 13.4). Still to be run on physical
 devices — the last gate before `v1.0` (M8).
+
+## Release audit (one-off)
+
+`node scripts/audit-release.mjs` (against `vite preview` on :4198) runs
+Lighthouse's mobile profile against a Playwright-managed Chromium and a
+network audit of a full two-context pairing + transfer, asserting every
+request is same-origin (PRD 9.1, DoD 5, DoD 8). Lighthouse is installed
+on demand (`npm i --no-save lighthouse`), so it stays out of
+`package.json`.
