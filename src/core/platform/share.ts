@@ -42,8 +42,12 @@ export async function readStagedShare(storage?: CacheStorage): Promise<File[]> {
     try {
       const staged = await cache.match(`./__share/${entry.i}`);
       if (!staged) continue;
-      const blob = await staged.blob();
-      files.push(new File([blob], entry.name, { type: entry.type }));
+      // Read as bytes, not as a Blob: a Blob built in another realm (the
+      // worker that staged it, or a test's fake CacheStorage) is not
+      // guaranteed to be unwrapped when passed as a File part, and ends up
+      // stringified instead. Bytes are a BufferSource everywhere.
+      const bytes = await staged.arrayBuffer();
+      files.push(new File([bytes], entry.name, { type: entry.type }));
     } catch {
       // One unreadable entry must not strand the rest of the share.
       continue;
