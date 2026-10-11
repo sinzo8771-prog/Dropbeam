@@ -281,6 +281,37 @@ describe("App (PRD 10.1 screens)", () => {
     );
   });
 
+  /**
+   * Regression guard: the guest side had no support check, so a browser
+   * without WebRTC that taps Join (or opens a shared link) was told the
+   * *network* failed, not that the browser cannot transfer at all. The
+   * cross-engine interop run in Playwright's WebKit build (no
+   * RTCPeerConnection) surfaces this: it reached the guest path through a
+   * link, not the Start button.
+   */
+  it("reports UNSUPPORTED on the guest paths too", () => {
+    const { unmount } = render(
+      <App settings={freshSettings()} baseUrl="https://dropbeam.example" />,
+    );
+    fireEvent.click(screen.getByText("Join"));
+    expect(screen.getByRole("alert").textContent).toContain(
+      "This browser can't do direct transfers.",
+    );
+    unmount();
+
+    // The shared-link route enters the guest flow without tapping Join.
+    const restore = location.hash;
+    try {
+      location.hash = "#j=DB1.abc";
+      render(<App settings={freshSettings()} baseUrl="https://dropbeam.example" />);
+      expect(screen.getByRole("alert").textContent).toContain(
+        "This browser can't do direct transfers.",
+      );
+    } finally {
+      location.hash = restore;
+    }
+  });
+
   it("surfaces an error message and a Try again action", () => {
     render(<App settings={freshSettings()} baseUrl="https://dropbeam.example" />);
     fireEvent.click(screen.getByText("Start"));

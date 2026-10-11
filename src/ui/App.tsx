@@ -467,6 +467,12 @@ export function App({ settings, baseUrl }: AppProps = {}) {
   /** Join flow (PRD 5.1 step 2): enter the guest state and wait for a code. */
   const join = (): void => {
     setError(null);
+    // Same guard as the host path: a browser without WebRTC must be told
+    // the app cannot run at all, not fail later with a network error.
+    if (!isWebRtcSupported()) {
+      fail("UNSUPPORTED");
+      return;
+    }
     chooseSide("guest");
     beginSession("guest").beginJoin();
   };
@@ -505,6 +511,10 @@ export function App({ settings, baseUrl }: AppProps = {}) {
    */
   const joinWithOffer = async (code: string): Promise<void> => {
     setError(null);
+    if (!isWebRtcSupported()) {
+      fail("UNSUPPORTED");
+      return;
+    }
     chooseSide("guest");
     const snap = await beginSession("guest").joinWithCode(code);
     setScreen(snap.state as ConnectionState);

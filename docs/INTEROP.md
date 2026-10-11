@@ -12,6 +12,8 @@ Codec used per browser pair, plus notes. `DB1` = minimal descriptor (PRD
 | Chromium ↔ Chromium (two browser contexts)                                                        | real WebRTC over loopback, DB1 codes exchanged as text/link | DB1   | pass (`tests/e2e/pairing-transfer.spec.ts`)         | 2026-10-10 |
 | Chromium ↔ Chromium (peer disconnect)                                                             | same pair, host device removed                              | —     | guest reaches `PEER_LOST` with no console errors    | 2026-10-10 |
 | Chromium ↔ Chromium (OPFS save path)                                                              | guest without File System Access                            | —     | file staged and saved (PRD 8.5 Firefox/Safari sink) | 2026-10-10 |
+| Chromium ↔ Firefox (two engines)                                                                  | real WebRTC, DB1 code pasted                                | DB1   | pass (`scripts/interop-matrix.mjs`)                 | 2026-10-10 |
+| Firefox ↔ Chromium (two engines)                                                                  | real WebRTC, DB1 code pasted                                | DB1   | pass (`scripts/interop-matrix.mjs`)                 | 2026-10-10 |
 | Chromium settings sheet (theme, hi, reduce motion, wake lock, STUN, persistence, Devanagari face) | —                                                           | —     | pass (`tests/e2e/settings.spec.ts`)                 | 2026-10-10 |
 
 The first row runs the real `DB1` encode/decode and the full session
@@ -32,20 +34,38 @@ row covers PRD 12's reason-code path. The guest in the transfer row saves
 with `showSaveFilePicker` removed, which is exactly the OPFS path Firefox
 and Safari take (PRD 8.5).
 
-> **Manual matrix status (2026-10-10): not yet run.** It still needs
-> physical devices on real networks; it is the remaining gate before
-> `v1.0` (PRD M8). Fill the Result/Notes cells as each pair is tested.
+The two cross-engine rows answer the "Chrome ↔ Firefox" manual row with
+**real engines** (Chromium 153 and Firefox 155 on one machine, pair over
+the paste route, DB1, matching verification words, guest saving through
+OPFS). They are loopback-on-one-machine, so they prove interop between
+engines — not LAN behaviour or camera QR.
+
+The WebKit rows of the manual matrix **cannot** be run here: Playwright's
+WebKit build for Windows ships without `RTCPeerConnection`, so no pairing
+is possible. That gap produced one useful finding, now fixed and covered
+by a unit test: the app used to answer "Join" in such a browser with a
+_network_ failure instead of "This browser can't do direct transfers".
+Both entry points now run the support check. Real Safari (macOS/iOS)
+still needs hardware.
+
+> **Manual matrix status (2026-10-10): partially covered.** The browser
+> pairs that do not need a phone are done above (Chromium ↔ Chromium and
+> Chromium ↔ Firefox, real engines, real WebRTC). What remains needs
+> physical devices on real networks: the QR route (camera), the Wi-Fi /
+> hotspot / guest-network behaviour, real Safari, and mobile power/screen
+> behaviour — the last gate before `v1.0` (PRD M8). Fill the cells as each
+> pair is tested.
 
 ## Manual (fill during M8)
 
-| Pair                             | Network                           | Route     | Codec | Result                 | Notes |
-| -------------------------------- | --------------------------------- | --------- | ----- | ---------------------- | ----- |
-| Windows Chrome ↔ Android Chrome  | same Wi-Fi                        | QR        |       |                        |       |
-| Windows Chrome ↔ iPhone Safari   | same Wi-Fi                        | QR + link |       |                        |       |
-| Chrome ↔ Firefox                 | same Wi-Fi                        | paste     |       |                        |       |
-| Chrome ↔ Safari (macOS)          | same Wi-Fi                        | paste     |       |                        |       |
-| Android Chrome ↔ Android Samsung | same hotspot                      | QR        |       |                        |       |
-| Any ↔ any                        | guest Wi-Fi with client isolation | —         |       | expect helpful failure |       |
+| Pair                             | Network                           | Route     | Codec | Result                 | Notes                                                 |
+| -------------------------------- | --------------------------------- | --------- | ----- | ---------------------- | ----------------------------------------------------- |
+| Windows Chrome ↔ Android Chrome  | same Wi-Fi                        | QR        |       |                        |                                                       |
+| Windows Chrome ↔ iPhone Safari   | same Wi-Fi                        | QR + link |       |                        |                                                       |
+| Chrome ↔ Firefox                 | same Wi-Fi                        | paste     | DB1   | **engine row done**    | loopback pair pass above; still run over real Wi-Fi   |
+| Chrome ↔ Safari (macOS)          | same Wi-Fi                        | paste     |       |                        | no WebRTC in the Windows WebKit build; needs hardware |
+| Android Chrome ↔ Android Samsung | same hotspot                      | QR        |       |                        |                                                       |
+| Any ↔ any                        | guest Wi-Fi with client isolation | —         |       | expect helpful failure |                                                       |
 
 ## Known limits
 

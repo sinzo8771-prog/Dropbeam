@@ -532,3 +532,29 @@ pwa:health` is green, and the FR-50 e2e asserts the worker controls the
   was added as the conventional `Allow: /` after the first attempt
   (`Disallow: /`) _lowered_ the Lighthouse SEO score: Lighthouse treats a
   page blocked from indexing as a failure, not a pass.
+
+---
+
+## 2026-10-10 — Cross-engine interop rows; guest-side UNSUPPORTED fix
+
+- **Problem:** The interop matrix needed "different engines", not just
+  different contexts, so `scripts/interop-matrix.mjs` runs Chromium
+  ↔ Firefox in both directions with real WebRTC over the paste route.
+  Playwright's WebKit build for Windows ships **without
+  `RTCPeerConnection`**, so the Safari rows stay hardware-gated — but
+  running into that wall exposed a real defect: the host path checked
+  `isWebRtcSupported()` before starting, and the guest paths did not, so
+  a browser with no WebRTC that tapped **Join** (or opened a shared link)
+  was told "Couldn't find a network path. Check Wi-Fi." — a network
+  diagnosis for a browser that cannot transfer at all.
+- **Choice:** `join()` and `joinWithOffer()` now run the same support
+  check `start()` always did, so both entry points answer UNSUPPORTED.
+  The interop runner records the blocked engines instead of failing
+  silently, and its rows say so.
+- **Reason:** A missing capability must be reported as a missing
+  capability (PRD 12 reason codes); the interop run is the first time a
+  browser without WebRTC actually reached that code path.
+- **Result:** Chromium ↔ Firefox and Firefox ↔ Chromium both pass with
+  real engines — DB1, matching verification words, guest saving through
+  OPFS, no console errors. WebKit: blocked, both directions, with the app
+  now correctly reporting UNSUPPORTED instead of a network error.
