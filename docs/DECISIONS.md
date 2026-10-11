@@ -558,3 +558,45 @@ pwa:health` is green, and the FR-50 e2e asserts the worker controls the
   real engines — DB1, matching verification words, guest saving through
   OPFS, no console errors. WebKit: blocked, both directions, with the app
   now correctly reporting UNSUPPORTED instead of a network error.
+
+---
+
+## 2026-10-11 — Post-v1 roadmap slice: self-hosting guide, shortcuts, text share
+
+Three roadmap items from PRD §19 that need no new infrastructure and no
+product decisions were shipped; the rest are blocked on scoping (see the
+end of this entry).
+
+- **Self-hosting + TURN guidance** (`docs/SELF-HOSTING.md`, linked from
+  the README): what a static host must provide (HTTPS, MIME types,
+  sub-path caveat, the two headers a `<meta>` CSP cannot carry), how to
+  keep the privacy invariants (`pwa:health` fails on an external URL; the
+  FR-40 key allowlist), and the STUN/TURN table with the exact seam for a
+  TURN build (`src/core/peer/ice-config.ts`). The app keeps shipping STUN
+  only: a TURN relay forwards file bytes, which contradicts the
+  "nothing is uploaded" promise, so it is documented as a deliberate
+  self-hoster change with coturn guidance rather than a default.
+- **App shortcuts** (roadmap "send to this device"): the manifest's
+  `shortcuts` open `./?screen=send` and `./?screen=selftest`, which the
+  app consumes into the same page state the home screen's quiet links use
+  — and then clears the query so a reload cannot replay it. `pwa:health`
+  now validates every shortcut URL and icon, and `tests/unit/pwa.test.ts`
+  - `tests/e2e/shortcuts.spec.ts` pin the routes (including an unknown
+    value falling through to the home screen).
+- **Text share target** (roadmap "clipboard sync", first slice): the
+  manifest now accepts `text`/`title`, the worker stages them under a
+  sentinel entry in the existing FR-51 staging cache, and `readStagedShare`
+  returns `{ files, text }`. The Send screen shows the shared text as it
+  will be sent, and the connected screen's note field starts pre-filled —
+  the user still presses Send, because text is never auto-sent.
+- **Deferred, needs a decision from you:** resumable transfers (protocol
+  change — chunk bitmap + per-chunk hashes, and a reconnect story the
+  codec's 10-minute expiry does not currently cover), multi-peer mesh
+  rooms (topology and approval changes), the numeric-code relay Worker
+  (needs a deploy target and a privacy decision), the encrypted receive
+  vault (key-derivation design), and the browser extension (packaging and
+  distribution).
+- **Reason:** these three are additive, reversible, and test-covered;
+  the rest change the protocol, the threat model or the deployment story
+  and should not be guessed at. Initial JS went 147.0 → 148.3 KB of the
+  153.6 KB budget; 272 unit/integration + 13 e2e tests green.

@@ -8,9 +8,16 @@ import { SettingsStore, type KeyValueStore } from "../../src/core/platform/stora
 type Staged = { name: string; type: string; body: string };
 
 /** In-memory CacheStorage stand-in keyed by the staging URLs. */
-function fakeStaging(entries: Staged[]): CacheStorage {
+function fakeStaging(entries: Staged[], text?: string): CacheStorage {
   const map = new Map<string, Response>();
-  const index = entries.map((entry, i) => ({ i, name: entry.name, type: entry.type }));
+  const index = entries.map((entry, i) => ({ i, name: entry.name, type: entry.type })) as {
+    i: number | "text";
+    name: string;
+    type: string;
+  }[];
+  // A shared text lands in the index under the sentinel entry, exactly as
+  // the service worker stages it.
+  if (text !== undefined) index.push({ i: "text", name: "text", type: "text/plain" });
   map.set(
     "./__share/index",
     new Response(JSON.stringify(index), { headers: { "content-type": "application/json" } }),
@@ -21,6 +28,7 @@ function fakeStaging(entries: Staged[]): CacheStorage {
       new Response(entry.body, { headers: { "content-type": entry.type } }),
     );
   });
+  if (text !== undefined) map.set("./__share/text", new Response(text));
   const cache = {
     match: async (key: RequestInfo | URL) => map.get(String(key)) ?? undefined,
     delete: async (key: RequestInfo | URL) => map.delete(String(key)),
@@ -60,21 +68,40 @@ describe("readStagedShare (FR-51 staging)", () => {
       { name: "notes.txt", type: "text/plain", body: "hello" },
       { name: "photo.jpg", type: "image/jpeg", body: "jpegbytes" },
     ]);
-    const files = await readStagedShare(storage);
-    expect(files.map((f) => f.name)).toEqual(["notes.txt", "photo.jpg"]);
-    expect(files[0].type).toBe("text/plain");
-    expect(await files[0].text()).toBe("hello");
+    const staged = await readStagedShare(storage);
+    expect(staged.files.map((f) => f.name)).toEqual(["notes.txt", "photo.jpg"]);
+    expect(staged.files[0].type).toBe("text/plain");
+    expect(await staged.files[0].text()).toBe("hello");
+    expect(staged.text).toBe("");
     // Staging is one-shot: a second read (reload) gets nothing.
-    expect(await readStagedShare(storage)).toEqual([]);
+    expect(await readStagedShare(storage)).toEqual({ files: [], text: "" });
+  });
+
+  it("returns shared text alongside the files (clipboard sync)", async () => {
+    const storage = fakeStaging(
+      [{ name: "notes.txt", type: "text/plain", body: "hello" }],
+      "https://example.test/article",
+    );
+    const staged = await readStagedShare(storage);
+    expect(staged.files).toHaveLength(1);
+    // The text comes back trimmed, ready for the note field.
+    expect(staged.text).toBe("https://example.test/article");
+  });
+
+  it("returns only text when a share carried no files", async () => {
+    const storage = fakeStaging([], "just some text");
+    const staged = await readStagedShare(storage);
+    expect(staged.files).toEqual([]);
+    expect(staged.text).toBe("just some text");
   });
 
   it("returns nothing when nothing was staged", async () => {
-    expect(await readStagedShare(fakeStaging([]))).toEqual([]);
+    expect(await readStagedShare(fakeStaging([]))).toEqual({ files: [], text: "" });
   });
 
   it("returns nothing when CacheStorage is unavailable", async () => {
     // jsdom has no caches; the guard must not throw (best-effort FR-51).
-    expect(await readStagedShare()).toEqual([]);
+    expect(await readStagedShare()).toEqual({ files: [], text: "" });
   });
 });
 
@@ -104,5 +131,37 @@ describe("Send screen from a share-target landing (FR-51)", () => {
     await waitFor(() => expect(location.hash).toBe(""));
     expect(screen.queryByText("Ready to send")).toBeNull();
     expect(screen.getByText("Start")).toBeTruthy();
+  });
+
+  it("shows a staged text share on the Send screen, ready to note", async () => {
+    history.replaceState(null, "", "/#shared");
+    installCaches(fakeStaging([], "https://example.test/story"));
+    render(<App settings={freshSettings()} baseUrl="https://dropbeam.example" />);
+    await waitFor(() => expect(screen.getByText("Ready to send")).toBeTruthy());
+    // The shared text is visible before pairing, and echoed in the label
+    // that says what will be sent.
+    expect(screen.getByText("Text ready to send")).toBeTruthy();
+    expect(screen.getByText("https://example.test/story")).toBeTruthy();
+  });
+
+  /**
+   * PWA shortcut route (roadmap "send to this device"): the manifest's
+   * shortcut URLs open the app with ?screen=…, which selects the same page
+   * the home screen's quiet links do. The query string is then cleared so
+   * a reload does not replay it.
+   */
+  it("opens the Send screen from the ?screen=send shortcut", async () => {
+    history.replaceState(null, "", "/?screen=send");
+    render(<App settings={freshSettings()} baseUrl="https://dropbeam.example" />);
+    await waitFor(() => expect(screen.getByText("Ready to send")).toBeTruthy());
+    expect(location.search).toBe("");
+    expect(screen.getByText("Start")).toBeTruthy();
+  });
+
+  it("opens the self-test from the ?screen=selftest shortcut", async () => {
+    history.replaceState(null, "", "/?screen=selftest");
+    render(<App settings={freshSettings()} baseUrl="https://dropbeam.example" />);
+    await waitFor(() => expect(screen.getByText("Connection test")).toBeTruthy());
+    expect(location.search).toBe("");
   });
 });

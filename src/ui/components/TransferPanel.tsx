@@ -16,6 +16,8 @@ export type TransferPanelProps = {
   files: FileProgress[];
   saved: SaveResult[];
   notes: IncomingText[];
+  /** Text prepared before the connection (e.g. a shared URL), pre-filled into the note. */
+  initialNote?: string;
   onSendFiles: (files: File[]) => void;
   onSendText: (body: string) => void;
   onCancel: (fid: number) => void;
@@ -27,13 +29,16 @@ export function TransferPanel({
   files,
   saved,
   notes,
+  initialNote,
   onSendFiles,
   onSendText,
   onCancel,
   onDismissNote,
 }: TransferPanelProps) {
   const inputRef = useRef<HTMLInputElement>(null);
-  const [note, setNote] = useState("");
+  // A note staged while pairing (share target) starts in the field, ready
+  // to send — the user still presses Send, since text is never auto-sent.
+  const [note, setNote] = useState(initialNote ?? "");
   const [dragging, setDragging] = useState(false);
 
   const send = (picked: FileList | null): void => {

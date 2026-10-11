@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -52,8 +52,27 @@ describe("installable PWA (PRD FR-50)", () => {
       action: "./share",
       method: "POST",
       enctype: "multipart/form-data",
-      params: { files: [{ name: "files", accept: ["*/*"], multiple: true }] },
+      params: {
+        title: "title",
+        text: "text",
+        files: [{ name: "files", accept: ["*/*"], multiple: true }],
+      },
     });
+  });
+
+  it("declares app shortcuts that land inside the app (roadmap quick-send)", () => {
+    // The long-press launcher entries open the SPA with ?screen=…, which
+    // App.tsx consumes into the same page state the quiet links use.
+    const urls = manifest.shortcuts.map((s: { url: string }) => s.url);
+    expect(urls).toEqual(["./?screen=send", "./?screen=selftest"]);
+    for (const shortcut of manifest.shortcuts as { name: string; icons: { src: string }[] }[]) {
+      expect(shortcut.name.length).toBeGreaterThan(0);
+      for (const icon of shortcut.icons) {
+        // Every referenced icon must exist: a dead icon silently drops the
+        // shortcut from the launcher.
+        expect(existsSync(join(publicDir, icon.src.replace("./", "")))).toBe(true);
+      }
+    }
   });
 
   it("stages share-target posts in the worker and keeps them across deploys", () => {
@@ -67,6 +86,9 @@ describe("installable PWA (PRD FR-50)", () => {
     expect(sw).toContain('"dropbeam-share"');
     expect(sw).toContain('"./#shared"');
     expect(sw).toContain("name !== SHARE_CACHE");
+    // Shared text is staged under its own sentinel entry ("clipboard sync").
+    expect(sw).toContain('form.get("text")');
+    expect(sw).toContain("TEXT_ENTRY");
   });
 
   it("ships a service worker whose cache name is version-stamped", () => {

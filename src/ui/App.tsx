@@ -150,6 +150,8 @@ export function App({ settings, baseUrl }: AppProps = {}) {
   const [page, setPage] = useState<"main" | "help" | "trouble" | "selftest" | "send">("main");
   /** FR-51: files staged by the share target, waiting for a connection. */
   const [staged, setStaged] = useState<File[]>([]);
+  /** Shared text/URL staged for the note field, sent only when the user sends. */
+  const [sharedText, setSharedText] = useState("");
   /** One auto-send attempt per connection: a failure must not loop. */
   const stagedSentRef = useRef(false);
 
@@ -170,17 +172,29 @@ export function App({ settings, baseUrl }: AppProps = {}) {
   useEffect(() => {
     if (typeof location === "undefined" || location.hash !== "#shared") return;
     let live = true;
-    void readStagedShare().then((files) => {
+    void readStagedShare().then((staged) => {
       if (!live) return;
       history.replaceState(null, "", location.pathname + location.search);
-      if (files.length > 0) {
-        setStaged(files);
+      if (staged.files.length > 0 || staged.text) {
+        setStaged(staged.files);
+        setSharedText(staged.text);
         setPage("send");
       }
     });
     return () => {
       live = false;
     };
+  }, []);
+
+  // PWA shortcuts (roadmap: "send to this device"): the manifest opens the
+  // app on ?screen=send or ?screen=selftest, which selects the page the
+  // same way the home screen's quiet links do.
+  useEffect(() => {
+    if (typeof location === "undefined") return;
+    const screen = new URLSearchParams(location.search).get("screen");
+    if (screen !== "send" && screen !== "selftest") return;
+    setPage(screen);
+    history.replaceState(null, "", location.pathname + location.hash);
   }, []);
   const assembler = useRef(new FrameAssembler());
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -319,7 +333,13 @@ export function App({ settings, baseUrl }: AppProps = {}) {
   // Exactly one attempt per connection — a failure re-stages the files
   // and says so, rather than retrying forever.
   useEffect(() => {
-    if (screen !== "CONNECTED") stagedSentRef.current = false;
+    if (screen !== "CONNECTED") {
+      stagedSentRef.current = false;
+      // A dropped connection clears the briefing: whatever was shared
+      // belonged to that attempt, and a stale note must not pre-fill the
+      // next one.
+      setSharedText("");
+    }
   }, [screen]);
   useEffect(() => {
     if (staged.length === 0 || screen !== "CONNECTED" || stagedSentRef.current) return;
@@ -558,13 +578,17 @@ export function App({ settings, baseUrl }: AppProps = {}) {
         <SendScreen
           t={t}
           staged={staged}
+          note={sharedText}
           onRemove={(file) => setStaged((files) => files.filter((f) => f !== file))}
           onStart={() => {
             setPage("main");
+            // The briefing is consumed by the pairing attempt it explains.
+            setSharedText("");
             void start();
           }}
           onJoin={() => {
             setPage("main");
+            setSharedText("");
             join();
           }}
           onBack={() => setPage("main")}
@@ -763,6 +787,8 @@ export function App({ settings, baseUrl }: AppProps = {}) {
                     files={transfer.files}
                     saved={transfer.saved}
                     notes={transfer.notes}
+                    // Text shared before pairing waits here for the user.
+                    initialNote={sharedText}
                     onSendFiles={(picked) => void transfer.sendFiles(picked)}
                     onSendText={(body) => {
                       transfer.sendText(body);

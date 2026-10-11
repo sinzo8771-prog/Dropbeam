@@ -6,19 +6,22 @@ import { formatBytes } from "./components/ProgressRow";
  * Share Target wait here until a device is paired. Pairing uses the
  * normal Start/Join flows; once the connection opens and the approval
  * gate allows transfers, the shell sends the staged files (one attempt
- * per connection, with a toast if it fails).
+ * per connection, with a toast if it fails). Shared text waits the
+ * same way and lands in the note field of the connected screen.
  */
 
 type Props = {
   t: Translate;
   staged: File[];
+  /** Shared text/URL waiting for the note field, or "" when none. */
+  note: string;
   onRemove: (file: File) => void;
   onStart: () => void;
   onJoin: () => void;
   onBack: () => void;
 };
 
-export function SendScreen({ t, staged, onRemove, onStart, onJoin, onBack }: Props) {
+export function SendScreen({ t, staged, note, onRemove, onStart, onJoin, onBack }: Props) {
   return (
     <section class="screen screen-send" data-staged={staged.length}>
       <h1>{t("share.title")}</h1>
@@ -40,6 +43,15 @@ export function SendScreen({ t, staged, onRemove, onStart, onJoin, onBack }: Pro
             </li>
           ))}
         </ul>
+      ) : null}
+      {/* Shared text is shown as it will be sent, so the user can see
+          what arrived from the share sheet before pairing. */}
+      {note ? (
+        <div class="settings-group">
+          <span class="settings-field-label">{t("share.noteLead")}</span>
+          {/* Peer- and share-supplied text is rendered as a text node. */}
+          <p class="note-body-text">{note}</p>
+        </div>
       ) : null}
       <p class="hint">{t("share.hint")}</p>
       <div class="home-actions">

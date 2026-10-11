@@ -17,6 +17,8 @@
 const CACHE = "dropbeam-" + "__BUILD_ID__";
 /** FR-51 staging cache: survives deploys (activate spares it). */
 const SHARE_CACHE = "dropbeam-share";
+/** Sentinel staging index entry for a shared text/URL ("clipboard sync"). */
+const TEXT_ENTRY = "text";
 /** The app shell. Hashed assets (JS/CSS) are cached on first visit. */
 const SHELL = ["./"];
 
@@ -48,7 +50,9 @@ self.addEventListener("activate", (event) => {
   );
 });
 
-/** FR-51: stage share-target files locally, land on #shared. */
+/** FR-51: stage share-target files locally, land on #shared. A text
+    share lands in the same staging index as a sentinel entry, which the
+    page reads back into the note field ("clipboard sync", roadmap). */
 async function stageSharedFiles(request, pageUrl) {
   try {
     const form = await request.formData();
@@ -61,6 +65,11 @@ async function stageSharedFiles(request, pageUrl) {
     for (let i = 0; i < files.length; i++) {
       index.push({ i, name: files[i].name, type: files[i].type });
       await cache.put(new Request("./__share/" + i), new Response(files[i]));
+    }
+    const text = (form.get("text") || form.get("title") || "").toString().trim();
+    if (text) {
+      index.push({ i: TEXT_ENTRY, name: "text", type: "text/plain" });
+      await cache.put(new Request("./__share/" + TEXT_ENTRY), new Response(text));
     }
     await cache.put(
       new Request("./__share/index"),

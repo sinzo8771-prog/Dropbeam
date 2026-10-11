@@ -20,8 +20,11 @@ your local network, verified with SHA-256 on arrival.
 - **Settings sheet:** theme (system/light/dark), English or Hindi, auto-accept,
   "Across networks" (STUN, off by default), keep-screen-awake, reduce motion and
   an optional device label — nothing but those keys is ever stored.
-- **Installs as a PWA:** offline shell, safe update flow, and a share target on
-  Android (shared files wait on a Send screen until a device is paired).
+- **Installs as a PWA:** offline shell, safe update flow, long-press app
+  shortcuts (**Send to this device**, **Test my connection**) and a share
+  target that takes files _and_ text/URLs from Android's share sheet — staged
+  files wait on a Send screen, and shared text waits in the note field,
+  until a device is paired.
 - **Help built in:** a "How it works" page, a troubleshooting page, and a
   one-tap connection self-test that runs two peers inside the same tab to prove
   WebRTC works in your browser.
@@ -72,6 +75,7 @@ the hotspot trick and the browser support table.
 - [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — how the pieces fit
 - [docs/PRIVACY.md](docs/PRIVACY.md) — threat model with linked tests
 - [docs/INTEROP.md](docs/INTEROP.md) — browser interop matrix
+- [docs/SELF-HOSTING.md](docs/SELF-HOSTING.md) — deploy guide, STUN/TURN
 - [docs/TESTING.md](docs/TESTING.md) — what each test layer covers
 - [docs/DECISIONS.md](docs/DECISIONS.md) — every notable build decision
 

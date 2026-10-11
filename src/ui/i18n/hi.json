@@ -57,6 +57,7 @@
   "share.leadOne": "1 फ़ाइल Dropbeam को भेजी गई।",
   "share.leadMany": "{count} फ़ाइलें Dropbeam को भेजी गईं।",
   "share.hint": "भेजने के लिए कोई डिवाइस जोड़ें।",
+  "share.noteLead": "भेजने के लिए तैयार टेक्स्ट",
   "share.remove": "हटाएँ",
   "share.sendFailed": "साझा की गई फ़ाइलें अपने आप नहीं भेजी जा सकीं। दोबारा जोड़कर कोशिश करें।",
 

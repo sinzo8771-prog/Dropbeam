@@ -64,6 +64,16 @@ if (buildId) {
 const purposes = icons.map((i) => i.purpose);
 if (!purposes.includes("maskable")) problems.push("no maskable icon for Android circular cropping");
 
+// --- shortcuts: every URL stays in scope, every icon file exists ---
+for (const shortcut of manifest.shortcuts ?? []) {
+  if (!shortcut.url?.startsWith("./") || shortcut.url.includes("://"))
+    problems.push(`shortcut "${shortcut.name}": url must be in-scope and relative`);
+  for (const icon of shortcut.icons ?? []) {
+    const file = join(publicDir, icon.src.replace("./", ""));
+    if (!existsSync(file)) problems.push(`shortcut "${shortcut.name}": icon ${icon.src} missing`);
+  }
+}
+
 // --- output ---
 const bar = (label, value) =>
   typeof value === "string" ? `[${label}] ${value}` : `[${label}] ${value ? "yes" : "no"}`;
@@ -81,6 +91,11 @@ for (const icon of icons) {
   const file = join(publicDir, icon.src.replace("./", ""));
   const { width } = pngSize(file);
   console.log(" ".repeat(9) + `${icon.src}  ${width}x${width}  purpose=${icon.purpose}`);
+}
+
+console.log(" ".repeat(9) + `shortcuts  ${(manifest.shortcuts ?? []).length}`);
+for (const shortcut of manifest.shortcuts ?? []) {
+  console.log(" ".repeat(11) + `${shortcut.name}  ${shortcut.url}`);
 }
 
 console.log("");

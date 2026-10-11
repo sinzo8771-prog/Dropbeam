@@ -57,6 +57,7 @@
   "share.leadOne": "1 file was shared with Dropbeam.",
   "share.leadMany": "{count} files were shared with Dropbeam.",
   "share.hint": "Pair a device to send them.",
+  "share.noteLead": "Text ready to send",
   "share.remove": "Remove",
   "share.sendFailed": "Couldn't send the shared files automatically. Pair again to retry.",
 

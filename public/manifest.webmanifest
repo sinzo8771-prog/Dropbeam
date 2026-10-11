@@ -12,6 +12,8 @@
     "method": "POST",
     "enctype": "multipart/form-data",
     "params": {
+      "title": "title",
+      "text": "text",
       "files": [
         {
           "name": "files",
@@ -21,6 +23,22 @@
       ]
     }
   },
+  "shortcuts": [
+    {
+      "name": "Send to this device",
+      "short_name": "Send",
+      "description": "Pair a device and send what you shared.",
+      "url": "./?screen=send",
+      "icons": [{ "src": "./icons/icon-192.png", "sizes": "192x192" }]
+    },
+    {
+      "name": "Test my connection",
+      "short_name": "Self-test",
+      "description": "Check that this browser can open direct connections.",
+      "url": "./?screen=selftest",
+      "icons": [{ "src": "./icons/icon-192.png", "sizes": "192x192" }]
+    }
+  ],
   "background_color": "#F6F2EA",
   "theme_color": "#F6F2EA",
   "icons": [
