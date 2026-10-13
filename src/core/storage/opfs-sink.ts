@@ -1,4 +1,4 @@
-import { SinkError, type SaveResult, type Sink, type SinkMeta } from "./sink";
+import { readStagedRange, SinkError, type SaveResult, type Sink, type SinkMeta } from "./sink";
 import { mapWriteError } from "./fsa-sink";
 import { sanitizeFilename } from "./filename";
 
@@ -150,8 +150,7 @@ export class OpfsSink implements Sink {
   async readRange(offset: number, length: number): Promise<Uint8Array | null> {
     const handle = this.handle;
     if (!handle) throw new SinkError("SINK_UNAVAILABLE");
-    const file = await handle.getFile();
-    return new Uint8Array(await file.slice(offset, offset + length).arrayBuffer());
+    return readStagedRange(handle, offset, length);
   }
 
   /**
@@ -161,8 +160,7 @@ export class OpfsSink implements Sink {
   async readPrefix(bytes: number): Promise<Uint8Array> {
     const handle = this.handle;
     if (!handle) throw new SinkError("SINK_UNAVAILABLE");
-    const file = await handle.getFile();
-    return new Uint8Array(await file.slice(0, bytes).arrayBuffer());
+    return readStagedRange(handle, 0, bytes);
   }
 
   async close(): Promise<SaveResult> {

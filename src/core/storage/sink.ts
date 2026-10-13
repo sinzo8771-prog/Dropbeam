@@ -53,3 +53,19 @@ export class SinkError extends Error {
     this.name = "SinkError";
   }
 }
+
+/**
+ * Read `length` bytes at `offset` back out of a staged file. Both disk-backed
+ * sinks expose their staged bytes through `getFile()` and slice it, so they
+ * share this one implementation rather than two copies that can drift apart.
+ * Returns fewer bytes than asked only when the file is shorter — the caller
+ * decides what that means (the per-chunk repair diff treats it as a mismatch).
+ */
+export async function readStagedRange(
+  handle: { getFile(): Promise<Blob> },
+  offset: number,
+  length: number,
+): Promise<Uint8Array> {
+  const file = await handle.getFile();
+  return new Uint8Array(await file.slice(offset, offset + length).arrayBuffer());
+}
