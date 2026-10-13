@@ -6,5 +6,6 @@ test-results/
 .vite/
 *.local
 .freebuff/
+graphify-out/
 demo-recording/
 .DS_Store
