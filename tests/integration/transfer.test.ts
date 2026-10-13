@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { DropbeamError } from "../../src/core/errors";
-import type { SaveResult } from "../../src/core/storage/sink";
+import { MemorySink } from "../../src/core/storage/memory-sink";
+import type { SaveResult, Sink, SinkMeta } from "../../src/core/storage/sink";
 import { MemoryChannel, waitFor, type MemoryChannelOptions } from "../helpers/memory-channel";
 import { Sender } from "../../src/core/transfer/sender";
 import { Receiver, type IncomingOffer } from "../../src/core/transfer/receiver";
@@ -29,6 +30,7 @@ function makeHarness(
     pingIntervalMs?: number;
     pongTimeoutMs?: number;
     pcState?: () => RTCPeerConnectionState | undefined;
+    createSink?: (meta: SinkMeta) => Sink | Promise<Sink>;
   } = {},
 ): Harness {
   const [txChannel, rxChannel] = MemoryChannel.pair(opts.channel ?? {});
@@ -59,6 +61,7 @@ function makeHarness(
       ...(opts.pingIntervalMs !== undefined ? { pingIntervalMs: opts.pingIntervalMs } : {}),
       ...(opts.pongTimeoutMs !== undefined ? { pongTimeoutMs: opts.pongTimeoutMs } : {}),
       ...(opts.pcState !== undefined ? { pcState: opts.pcState } : {}),
+      ...(opts.createSink !== undefined ? { createSink: opts.createSink } : {}),
     },
   );
   h.sender = new Sender(
@@ -95,6 +98,24 @@ function blobOf(size: number, seed = 7): Blob {
 async function sha256Hex(bytes: Uint8Array<ArrayBuffer>): Promise<string> {
   const digest = await globalThis.crypto.subtle.digest("SHA-256", bytes);
   return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+/**
+ * A sink that stages bytes but cannot read them back or rewrite them — the
+ * exact capability gap per-chunk repair (PRD 19) checks for before it starts
+ * the handshake.
+ */
+function nonRandomAccessSink(): (meta: SinkMeta) => Promise<Sink> {
+  return async () => {
+    const inner = new MemorySink();
+    return {
+      kind: "memory" as const,
+      open: (m: SinkMeta) => inner.open(m),
+      write: (chunk: Uint8Array) => inner.write(chunk),
+      close: () => inner.close(),
+      abort: () => inner.abort(),
+    };
+  };
 }
 
 async function expectRoundTrip(size: number): Promise<void> {
@@ -220,12 +241,21 @@ describe("prompt, decline and cancel (FR-13, FR-16)", () => {
 });
 
 describe("integrity failures (FR-17, PRD 12)", () => {
-  it("detects a corrupted chunk and discards the partial file", async () => {
-    let corrupted = false;
+  it("repairs every corrupted chunk instead of discarding the file (PRD 19)", async () => {
+    // Every original chunk is tampered with in flight. PRD 19 rewrites all
+    // of them and saves the file, so the FR-17 "discard the partial" outcome
+    // is no longer what a corrupt-but-repairable transfer produces.
+    let resending = false;
     const h = makeHarness({
       channel: {
         interceptOutgoing: (data) => {
-          if (corrupted || typeof data === "string") return;
+          if (typeof data === "string") {
+            // The receiver's `repair` request marks the switch from the
+            // original send to re-sent chunks, which arrive untampered.
+            if (data.includes('"k":"repair"')) resending = true;
+            return;
+          }
+          if (resending) return;
           const bytes =
             data instanceof ArrayBuffer
               ? new Uint8Array(data)
@@ -236,17 +266,21 @@ describe("integrity failures (FR-17, PRD 12)", () => {
                 );
           if (bytes[0] === 0x01 && bytes.byteLength > 20) {
             bytes[20] = (bytes[20]! ^ 0xff) & 0xff;
-            corrupted = true;
           }
         },
       },
     });
 
-    const done = h.sender.sendFiles([{ blob: blobOf(64 * 1024), name: "tampered.bin" }]);
-    await expect(done).rejects.toBeInstanceOf(DropbeamError);
-    await waitFor(() => h.rxPhases.get(1) === "FAILED", { label: "failed" });
-    expect(h.errors.some((e) => e.code === "HASH_MISMATCH")).toBe(true);
-    expect(h.saved.length).toBe(0);
+    const blob = blobOf(64 * 1024);
+    const original = new Uint8Array(await blob.arrayBuffer());
+
+    const done = h.sender.sendFiles([{ blob, name: "tampered.bin" }]);
+    await waitFor(() => h.saved.length === 1, { label: "repaired save" });
+    await done;
+
+    const received = new Uint8Array(await h.saved[0]!.result.blob!.arrayBuffer());
+    expect(await sha256Hex(received)).toBe(await sha256Hex(original));
+    expect(h.errors.length).toBe(0);
   });
 
   it("aborts with SEQ_GAP when a frame goes missing", async () => {
@@ -328,4 +362,153 @@ describe("heartbeat (PRD 8.4)", () => {
       });
     },
   );
+});
+
+describe("per-chunk repair (PRD 19)", () => {
+  /** Counts every `repair` request the receiver sends for a fid. */
+  function countingCorruption(channel: MemoryChannelOptions): {
+    opts: MemoryChannelOptions;
+    repairs: number[];
+  } {
+    const repairs: number[] = [];
+    const opts: MemoryChannelOptions = {
+      ...channel,
+      interceptOutgoing: (data, from) => {
+        channel.interceptOutgoing?.(data, from);
+        if (typeof data !== "string") return;
+        let msg: { k?: string; fid?: number; indices?: number[] };
+        try {
+          msg = JSON.parse(data) as typeof msg;
+        } catch {
+          return;
+        }
+        if (msg.k === "repair" && typeof msg.fid === "number") repairs.push(msg.fid);
+      },
+    };
+    return { opts, repairs };
+  }
+
+  it("repairs a corrupted chunk and saves the intact file", async () => {
+    let corrupted = false;
+    const { opts, repairs } = countingCorruption({
+      interceptOutgoing: (data) => {
+        if (corrupted || typeof data === "string") return;
+        const view =
+          data instanceof ArrayBuffer
+            ? new Uint8Array(data)
+            : new Uint8Array(
+                (data as Uint8Array).buffer,
+                (data as Uint8Array).byteOffset,
+                (data as Uint8Array).byteLength,
+              );
+        if (view[0] === 0x01 && view.byteLength > 20) {
+          view[20] = (view[20]! ^ 0xff) & 0xff;
+          corrupted = true;
+        }
+      },
+    });
+    const h = makeHarness({ channel: opts });
+    const blob = blobOf(64 * 1024);
+    const original = new Uint8Array(await blob.arrayBuffer());
+
+    const done = h.sender.sendFiles([{ blob, name: "repairable.bin" }]);
+    await waitFor(() => h.saved.length === 1, { label: "repaired save" });
+    await done;
+
+    const received = new Uint8Array(await h.saved[0]!.result.blob!.arrayBuffer());
+    expect(await sha256Hex(received)).toBe(await sha256Hex(original));
+    expect(h.txPhases.get(1)).toBe("DONE");
+    // Single pass: exactly one `repair` request for the file.
+    expect(repairs).toEqual([1]);
+  });
+
+  it("requests the bad indices exactly once", async () => {
+    let corrupted = false;
+    const { opts, repairs } = countingCorruption({
+      interceptOutgoing: (data) => {
+        if (corrupted || typeof data === "string") return;
+        const view =
+          data instanceof ArrayBuffer
+            ? new Uint8Array(data)
+            : new Uint8Array(
+                (data as Uint8Array).buffer,
+                (data as Uint8Array).byteOffset,
+                (data as Uint8Array).byteLength,
+              );
+        if (view[0] === 0x01 && view.byteLength > 20) {
+          view[20] = (view[20]! ^ 0xff) & 0xff;
+          corrupted = true;
+        }
+      },
+    });
+    const h = makeHarness({ channel: opts });
+    await h.sender
+      .sendFiles([{ blob: blobOf(64 * 1024), name: "once.bin" }])
+      .catch(() => undefined);
+    await waitFor(() => h.saved.length === 1 || h.errors.length > 0, {
+      label: "settled",
+    });
+    expect(repairs.length).toBeLessThanOrEqual(1);
+  });
+
+  it("fails hard when the re-sent chunks are still corrupt (no retry loop)", async () => {
+    let pass = 0;
+    const h = makeHarness({
+      channel: {
+        interceptOutgoing: (data) => {
+          if (typeof data === "string") return;
+          const view =
+            data instanceof ArrayBuffer
+              ? new Uint8Array(data)
+              : new Uint8Array(
+                  (data as Uint8Array).buffer,
+                  (data as Uint8Array).byteOffset,
+                  (data as Uint8Array).byteLength,
+                );
+          if (view[0] === 0x01 && view.byteLength > 20) {
+            view[20] = (view[20]! ^ 0xff) & 0xff;
+            pass += 1;
+          }
+        },
+      },
+    });
+
+    const done = h.sender.sendFiles([{ blob: blobOf(64 * 1024), name: "hopeless.bin" }]);
+    await expect(done).rejects.toBeInstanceOf(DropbeamError);
+    await waitFor(() => h.rxPhases.get(1) === "FAILED", { label: "terminal fail" });
+    expect(h.errors.some((e) => e.code === "HASH_MISMATCH")).toBe(true);
+    expect(h.saved.length).toBe(0);
+    // Every DATA frame is tampered with — the 4 original chunks and the 4
+    // re-sent ones — so the second whole-file hash still disagrees.
+    expect(pass).toBe(8);
+  });
+
+  it("stays terminal when the sink cannot read staged bytes back", async () => {
+    let corrupted = false;
+    const { opts, repairs } = countingCorruption({
+      interceptOutgoing: (data) => {
+        if (corrupted || typeof data === "string") return;
+        const view =
+          data instanceof ArrayBuffer
+            ? new Uint8Array(data)
+            : new Uint8Array(
+                (data as Uint8Array).buffer,
+                (data as Uint8Array).byteOffset,
+                (data as Uint8Array).byteLength,
+              );
+        if (view[0] === 0x01 && view.byteLength > 20) {
+          view[20] = (view[20]! ^ 0xff) & 0xff;
+          corrupted = true;
+        }
+      },
+    });
+    const h = makeHarness({ channel: opts, createSink: nonRandomAccessSink() });
+    const done = h.sender.sendFiles([{ blob: blobOf(64 * 1024), name: "noread.bin" }]);
+
+    await expect(done).rejects.toBeInstanceOf(DropbeamError);
+    await waitFor(() => h.rxPhases.get(1) === "FAILED", { label: "failed" });
+    expect(h.errors.some((e) => e.code === "HASH_MISMATCH")).toBe(true);
+    // A read-back-incapable sink never even asks for a plan.
+    expect(repairs.length).toBe(0);
+  });
 });

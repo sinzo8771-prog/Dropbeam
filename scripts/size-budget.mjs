@@ -31,11 +31,6 @@ try {
   process.exit(1);
 }
 
-// Lazy chunks are excluded from the initial budget per PRD NFR-1 — each is
-// a dynamic import the first paint never needs (scanner, QR render, hash
-// worker, the settings sheet, the fflate fallback) — but they are still
-// reported below so the total shipped weight stays visible.
-const isLazy = (name) => /scan|jsqr|qr|worker|hash|frame|settings|fflate-fallback/i.test(name);
 // Some chunks (e.g. the hand-written service worker) are not gzipped; fall
 // back to the raw size so a missing gzip stream cannot mask the budget.
 const gzSize = (file) => {
@@ -47,9 +42,29 @@ const gzSize = (file) => {
   }
 };
 
+// "Initial" means what the document loads before first paint: the entry
+// module referenced by index.html. Vite bundles every static import into
+// that entry, so anything else in dist/ is either a dynamic import() chunk
+// (scanner/QR render, hash worker, the hash-wasm inline fallback, the
+// settings sheet, the fflate fallback, per-chunk repair) or the hand-written
+// service worker — none of it blocks first paint. Those are reported as
+// `lazy` so the total shipped weight stays visible without padding the
+// initial number, and the classification cannot rot as chunks are added
+// (a filename pattern silently misses the hash-wasm chunk, which Vite names
+// after its package entry rather than its contents).
+const htmlFiles = files.filter((f) => f.endsWith(".html"));
+const initialNames = new Set();
+for (const htmlFile of htmlFiles) {
+  const html = readFileSync(path.join(dist, htmlFile), "utf8");
+  for (const m of html.matchAll(/<script\b[^>]*\bsrc="([^"]+)"/g)) {
+    const src = decodeURIComponent(m[1]).replace(/^\.?\//, "");
+    if (src.endsWith(".js")) initialNames.add(src);
+  }
+}
+
 const scripts = files.filter((f) => f.endsWith(".js"));
-const initial = scripts.filter((f) => !isLazy(path.basename(f)));
-const lazy = scripts.filter((f) => isLazy(path.basename(f)));
+const initial = scripts.filter((f) => initialNames.has(f));
+const lazy = scripts.filter((f) => !initialNames.has(f));
 
 if (initial.length === 0) {
   console.error("FAIL: no initial JS chunks found in dist/ — the budget check cannot pass");

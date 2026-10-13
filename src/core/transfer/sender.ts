@@ -140,6 +140,38 @@ export class Sender {
         if (msg.files.length > 0) this.events.onResumable?.(msg.files);
         break;
       }
+      case "mismatch": {
+        // Whole-file hash failed; the receiver wants per-chunk digests so it
+        // can name only the bad chunks. Lazy-loaded: dead code until a
+        // transfer actually corrupts. Failures here leave the transfer alone
+        // — a `done` already went out, and the peer's `ok`/`err` still owns
+        // the outcome.
+        void (async () => {
+          const f = this.inflight.get(msg.fid);
+          if (!f) return;
+          const { hashSourceChunks } = await import("./repair-sender");
+          const hashes = await hashSourceChunks(f.blob);
+          this.channel.send(encodeControl({ k: "plan", fid: msg.fid, hashes }));
+        })().catch(() => undefined);
+        break;
+      }
+      case "repair": {
+        // The receiver rewrote in place and asked for exactly these indices
+        // once. Re-read them from the source blob and re-send as DATA frames
+        // at their original seq; the receiver's `repairing` path writes them
+        // to the right offset. No retry loop: a second mismatch is terminal.
+        void (async () => {
+          const f = this.inflight.get(msg.fid);
+          if (!f) return;
+          const { readChunk } = await import("./repair-sender");
+          for (const index of msg.indices) {
+            const chunk = await readChunk(f.blob, index);
+            await this.bp.drain();
+            this.channel.send(encodeDataFrame(f.fid, index, chunk));
+          }
+        })().catch(() => undefined);
+        break;
+      }
       default:
         break;
     }

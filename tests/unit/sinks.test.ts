@@ -101,6 +101,7 @@ describe("FsaSink (PRD 8.5)", () => {
         },
         close: async () => {},
       }),
+      getFile: async () => new Blob([]),
     });
     await sink.open(META);
     await expect(sink.write(PAYLOAD)).rejects.toMatchObject({ code: "DISK_FULL" });

@@ -24,6 +24,18 @@ export interface Sink {
   readonly kind: SinkKind;
   open(meta: SinkMeta): Promise<void>;
   write(chunk: Uint8Array): Promise<void>;
+  /**
+   * Overwrite `bytes` at an absolute file offset (roadmap: per-chunk repair).
+   * The range must already lie inside the staged file — repair rewrites bytes
+   * that were written once, it never extends a file past its announced size.
+   */
+  writeAt?(offset: number, bytes: Uint8Array): Promise<void>;
+  /**
+   * Read `length` bytes starting at `offset` from the staged file, for
+   * re-hashing after a whole-file mismatch. Only disk-backed sinks can do
+   * this; a memory sink returns null and the caller skips per-chunk repair.
+   */
+  readRange?(offset: number, length: number): Promise<Uint8Array | null>;
   close(): Promise<SaveResult>;
   abort(): Promise<void>;
   /**

@@ -128,7 +128,7 @@ Roles are about the handshake only; after connecting, both can send.
 - **FR-14** Chunked transfer with backpressure (section 8.4). Max single file size: unlimited by protocol; practical limits shown in UI per browser (section 8.5).
 - **FR-15** Progress per file and total: bytes, %, speed (rolling 2 s average), ETA.
 - **FR-16** Cancel any file (either side). Cancel all.
-- **FR-17** Integrity: per-file SHA-256 computed incrementally on both ends and compared at the end; mismatch = "File corrupted, retry" and the partial file is discarded. (Use incremental hashing; see 8.6.)
+- **FR-17** Integrity: per-file SHA-256 computed incrementally on both ends and compared at the end. On mismatch the receiver asks the sender for per-chunk digests, rewrites only the bad chunks in place, and re-verifies the whole file exactly once (per-chunk repair, section 19). Repair that cannot run — a sink that cannot read its staged bytes back or rewrite them, silence from the sender, or a second mismatch after the rewrite — stays terminal: "File corrupted, retry", and the partial file is discarded. (Use incremental hashing; see 8.6.)
 - **FR-18** Folder send (desktop Chromium/Firefox via `webkitdirectory`): sent as multiple files preserving relative paths; receiver saves into a chosen directory (Chromium) or as a ZIP (others, v1.1).
 - **FR-19** Transfers continue while the tab is in the foreground; request a **Screen Wake Lock** during active transfers where supported. Show a warning on mobile that locking the screen may pause the transfer.
 - **FR-20** After completion show: Save, Open (images/PDF/video preview where cheap), Copy path (n/a), and "Send back".
@@ -616,7 +616,8 @@ Full manual device matrix, fix bugs, write `INTEROP.md`, README with GIF demo, t
 
 ## 19. Roadmap (post v1, do not build now)
 
-- Resumable transfers: shipped for the re-pair case (chunk offset, whole-file hash; see DECISIONS 2026-10-11). Recoverable-drop grace (heartbeat waits out a `disconnected` ICE blip) shipped the same day; see DECISIONS 2026-10-11. The chunk bitmap / hash tree for per-chunk repair, and a full auto-reconnect _within_ a session (no user re-pair), remain roadmap.
+- Resumable transfers: shipped for the re-pair case (chunk offset, whole-file hash; see DECISIONS 2026-10-11). Recoverable-drop grace (heartbeat waits out a `disconnected` ICE blip) shipped the same day; see DECISIONS 2026-10-11. Per-chunk repair of a completed-but-corrupt file — single-pass, disk-backed sinks only — shipped 2026-10-12; see DECISIONS 2026-10-12. The chunk bitmap / hash tree, and a full auto-reconnect _within_ a session (no user re-pair), remain roadmap.
+- Per-chunk repair (shipped 2026-10-12): on a whole-file mismatch the receiver sends `mismatch`, the sender answers `plan` with one SHA-256 per 16 KiB chunk of the source, and the receiver names the bad indices once in `repair`. The sender re-sends exactly those chunks as DATA frames at their original sequence numbers; the receiver rewrites them with `writeAt(offset, chunk)` and hashes the whole staged file one final time. It is lazily loaded (dead code until a corruption happens) and needs a sink that can read back and rewrite (OPFS/File System Access); a memory-staged file has nothing to diff against, so that path stays terminal. Chunks that never arrived are `SEQ_GAP` and are not repaired — a missing chunk cannot be rewritten from a digest.
 - Multi-peer rooms (mesh) and one-to-many broadcast.
 - Optional tiny signaling relay (e.g. a free Worker) for **short numeric pairing codes**, still no file relay; strictly opt-in.
 - Optional TURN guidance for self-hosters.

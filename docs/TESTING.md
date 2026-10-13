@@ -36,10 +36,17 @@ included — re-pairs, and proves the receiver's parked offset continues with
 exactly the missing chunk re-crossing the wire and the file verifying
 byte-identical; it also pins that memory sinks start over (with a fresh
 prompt), that a clean transfer leaves nothing parked, and that `chunks` past
-the end of a file are rejected on the wire (PRD 9.4). The heartbeat suite in
-`transfer.test.ts` pins `PEER_LOST` at the plain pong timeout and the
-recoverable-drop grace: while the wired `pcState` reads `disconnected` the
-deadline doubles, and `failed` / `closed` still fail at the plain one.
+the end of a file are rejected on the wire (PRD 9.4). The per-chunk repair
+suite in `transfer.test.ts` corrupts chunks in flight and covers: one bad
+chunk repaired with the file saved byte-identical and exactly one `repair`
+request sent; every chunk corrupted in the same pass (only the re-sent
+chunks arrive clean, or the handshake cannot succeed); the re-sent chunks
+still corrupt, which is terminal after the single re-verify; and a sink
+that cannot read its staged bytes back, never even asking for a plan. The
+heartbeat suite in `transfer.test.ts` pins `PEER_LOST` at the plain pong
+timeout and the recoverable-drop grace: while the wired `pcState` reads
+`disconnected` the deadline doubles, and `failed` / `closed` still fail at
+the plain one.
 
 ## End-to-end (`tests/e2e`)
 

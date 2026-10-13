@@ -128,6 +128,32 @@ export class OpfsSink implements Sink {
     }
   }
 
+  async writeAt(offset: number, bytes: Uint8Array): Promise<void> {
+    const writable = this.writable;
+    if (!writable) throw new SinkError("SINK_UNAVAILABLE");
+    try {
+      if (supportsPositionedWrite(writable)) {
+        const at: PositionedWrite = {
+          type: "write",
+          position: offset,
+          data: new Uint8Array(bytes),
+        };
+        await writable.write(at as unknown as BufferSource);
+      } else {
+        await writable.write(new Uint8Array(bytes));
+      }
+    } catch (err) {
+      throw mapWriteError(err);
+    }
+  }
+
+  async readRange(offset: number, length: number): Promise<Uint8Array | null> {
+    const handle = this.handle;
+    if (!handle) throw new SinkError("SINK_UNAVAILABLE");
+    const file = await handle.getFile();
+    return new Uint8Array(await file.slice(offset, offset + length).arrayBuffer());
+  }
+
   /**
    * The first `bytes` of the staged file, for re-hashing the prefix of a
    * resumed transfer (the receiver's hasher state died with the session).

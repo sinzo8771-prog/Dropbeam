@@ -26,6 +26,45 @@ export class MemorySink implements Sink {
     this.bytes += chunk.byteLength;
   }
 
+  async writeAt(offset: number, bytes: Uint8Array): Promise<void> {
+    // Locate the chunk containing `offset`, then overwrite the overlap. A
+    // repair write always lands on a chunk boundary inside an existing chunk,
+    // so this never has to grow the array.
+    let at = 0;
+    for (let i = 0; i < this.chunks.length; i++) {
+      const c = this.chunks[i]!;
+      const end = at + c.byteLength;
+      if (offset >= at && offset < end) {
+        const rel = offset - at;
+        const n = Math.min(bytes.byteLength, c.byteLength - rel);
+        c.set(bytes.subarray(0, n), rel);
+        return;
+      }
+      at = end;
+    }
+    throw new SinkError("SINK_UNAVAILABLE");
+  }
+
+  async readRange(offset: number, length: number): Promise<Uint8Array | null> {
+    const out = new Uint8Array(length);
+    let at = 0;
+    let filled = 0;
+    for (const c of this.chunks) {
+      const end = at + c.byteLength;
+      if (end <= offset) {
+        at = end;
+        continue;
+      }
+      const start = Math.max(offset, at);
+      const n = Math.min(end, offset + length) - start;
+      if (n <= 0) break;
+      out.set(c.subarray(start - at, start - at + n), filled);
+      filled += n;
+      at = end;
+    }
+    return filled === length ? out : null;
+  }
+
   async close(): Promise<SaveResult> {
     const meta = this.meta;
     if (!meta) throw new SinkError("SINK_UNAVAILABLE");

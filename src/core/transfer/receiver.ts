@@ -88,6 +88,12 @@ export class Receiver {
   private readonly pingIntervalMs: number;
   private readonly pongTimeoutMs: number;
   private readonly store: ResumeStore;
+  /** Fids waiting on the sender's per-chunk digest plan (per-chunk repair). */
+  private readonly planWaiters = new Map<number, (hashes: string[] | null) => void>();
+  /** Fids whose re-sent chunks are written in place instead of appended. */
+  private readonly repairing = new Set<number>();
+  /** Per-fid per-chunk-index "landed" resolvers, registered before we ask. */
+  private readonly repairWaits = new Map<number, Map<number, () => void>>();
 
   constructor(
     private readonly channel: ChannelLike,
@@ -187,6 +193,9 @@ export class Receiver {
       case "done":
         void this.verify(msg.fid, msg.sha256);
         break;
+      case "plan":
+        this.onPlan(msg.fid, msg.hashes);
+        break;
       case "cancel": {
         const st = this.active.get(msg.fid);
         if (st && !st.canceled) {
@@ -209,6 +218,104 @@ export class Receiver {
     }
   }
 
+  /**
+   * Whole-file hash mismatch (roadmap: per-chunk repair). If the sink can
+   * read its staged bytes back, load the repair path (lazy — it is dead code
+   * until a transfer actually corrupts) and drive a single-pass handshake: ask
+   * for the sender's per-chunk digests, name the bad indices once, rewrite
+   * them in place, then re-verify the whole file one final time. A sink that
+   * cannot read back has nothing to diff against, so the mismatch stays
+   * terminal. Any failure in this path is terminal too — never retried.
+   */
+  private async repairOrFail(st: RxState, sha256: string): Promise<void> {
+    if (typeof st.sink.readRange !== "function" || typeof st.sink.writeAt !== "function") {
+      await this.fail(st, "HASH_MISMATCH");
+      return;
+    }
+    try {
+      const mod = await import("./repair");
+      const file = { sink: st.sink, size: st.meta.size };
+      this.channel.send(encodeControl({ k: "mismatch", fid: st.fid }));
+      const plan = await this.awaitPlan(st.fid);
+      if (!plan) {
+        await this.fail(st, "HASH_MISMATCH");
+        return;
+      }
+      const staged = await mod.hashStagedChunks(file);
+      if (!staged) {
+        await this.fail(st, "HASH_MISMATCH");
+        return;
+      }
+      const bad = mod.diffChunks(staged, plan);
+      if (bad.length === 0) {
+        await this.fail(st, "HASH_MISMATCH");
+        return;
+      }
+      // Single pass: name every bad index once. Waiters are registered
+      // *before* the request goes out so a fast reply cannot land before we
+      // are listening; onFrame resolves each as its rewrite lands.
+      const landed = new Map<number, () => void>();
+      const waits = bad.map((idx) => new Promise<void>((resolve) => landed.set(idx, resolve)));
+      this.repairWaits.set(st.fid, landed);
+      this.repairing.add(st.fid);
+      this.channel.send(encodeControl({ k: "repair", fid: st.fid, indices: bad }));
+      // Bound the wait so a silent sender cannot hang the transfer; a partial
+      // or missing rewrite is caught by the final re-verify below.
+      await new Promise<void>((resolve) => {
+        const timer = setTimeout(resolve, this.pongTimeoutMs * 4);
+        void Promise.all(waits).then(() => {
+          clearTimeout(timer);
+          resolve();
+        });
+      });
+      this.repairing.delete(st.fid);
+      this.repairWaits.delete(st.fid);
+      const good = await mod.reverifyWholeFile(file, sha256);
+      if (!good) {
+        await this.fail(st, "HASH_MISMATCH");
+        return;
+      }
+      this.channel.send(encodeControl({ k: "ok", fid: st.fid }));
+      const result = await st.sink.close();
+      this.active.delete(st.fid);
+      st.hasher.dispose();
+      this.events.onPhase?.(st.fid, "DONE");
+      this.events.onSaved?.(st.fid, result);
+    } catch {
+      await this.fail(st, "HASH_MISMATCH");
+    }
+  }
+
+  /**
+   * Resolves with the sender's `plan` digests, or null if it never answers in
+   * time. A dead or silent sender must not hang the transfer: after the grace
+   * window the waiter is dropped and the caller treats it as a terminal
+   * mismatch rather than waiting forever.
+   */
+  private awaitPlan(fid: number): Promise<string[] | null> {
+    return new Promise((resolve) => {
+      const timer = setTimeout(() => {
+        this.planWaiters.delete(fid);
+        resolve(null);
+      }, this.pongTimeoutMs * 4);
+      const done = (hashes: string[] | null): void => {
+        clearTimeout(timer);
+        this.planWaiters.delete(fid);
+        resolve(hashes);
+      };
+      this.planWaiters.set(fid, done);
+    });
+  }
+
+  /** Route an incoming `plan` to the transfer waiting on it, if any. */
+  private onPlan(fid: number, hashes: string[]): void {
+    const resolve = this.planWaiters.get(fid);
+    if (resolve) {
+      this.planWaiters.delete(fid);
+      resolve(hashes.length > 0 ? hashes : null);
+    }
+  }
+
   private parkedFor(file: OfferedFile): ParkedInbound | undefined {
     return file.chunks !== undefined ? this.store.inboundFor(file.name, file.size) : undefined;
   }
@@ -216,6 +323,20 @@ export class Receiver {
   private onFrame(frame: DataChunk): void {
     const st = this.active.get(frame.fid);
     if (!st || st.canceled) return; // frame for a file we declined or canceled
+    // Re-sent repair chunks land at their original offset, not the append
+    // cursor, and never advance the sequence or the incremental hasher (the
+    // whole file is re-hashed from staged bytes after the rewrite).
+    if (this.repairing.has(st.fid)) {
+      // `repairing` is only set after repairOrFail confirmed writeAt exists.
+      // Resolve this index's waiter only after the rewrite has landed, so the
+      // final re-verify never races an in-flight write.
+      void st.sink.writeAt!(frame.seq * CHUNK_SIZE, frame.payload)
+        .catch(() => {
+          void this.fail(st, "SINK_UNAVAILABLE");
+        })
+        .then(() => this.repairWaits.get(st.fid)?.get(frame.seq)?.());
+      return;
+    }
     if (frame.seq !== st.expectedSeq) {
       void this.fail(st, "SEQ_GAP");
       return;
@@ -256,7 +377,7 @@ export class Receiver {
       await st.chain;
       const hex = await st.hasher.digest();
       if (hex !== sha256) {
-        await this.fail(st, "HASH_MISMATCH");
+        await this.repairOrFail(st, sha256);
         return;
       }
       this.channel.send(encodeControl({ k: "ok", fid }));

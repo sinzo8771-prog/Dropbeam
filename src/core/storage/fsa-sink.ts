@@ -26,12 +26,17 @@ export function mapWriteError(err: unknown): SinkError {
 }
 
 type FsaWritable = {
-  write(chunk: BufferSource): Promise<void>;
+  write(
+    chunk: BufferSource | { type: "write"; position: number; data: BufferSource },
+  ): Promise<void>;
   close(): Promise<void>;
   abort?(reason?: unknown): Promise<void>;
 };
 
-type FsaFileHandle = { createWritable(): Promise<FsaWritable> };
+type FsaFileHandle = {
+  createWritable(): Promise<FsaWritable>;
+  getFile(): Promise<Blob>;
+};
 
 export class FsaSink implements Sink {
   readonly kind = "fsa" as const;
@@ -81,6 +86,23 @@ export class FsaSink implements Sink {
       throw mapWriteError(err);
     }
     this.bytes += chunk.byteLength;
+  }
+
+  async writeAt(offset: number, bytes: Uint8Array): Promise<void> {
+    const writable = this.writable;
+    if (!writable) throw new SinkError("SINK_UNAVAILABLE");
+    try {
+      await writable.write({ type: "write", position: offset, data: new Uint8Array(bytes) });
+    } catch (err) {
+      throw mapWriteError(err);
+    }
+  }
+
+  async readRange(offset: number, length: number): Promise<Uint8Array | null> {
+    const handle = this.handle;
+    if (!handle) throw new SinkError("SINK_UNAVAILABLE");
+    const file = await handle.getFile();
+    return new Uint8Array(await file.slice(offset, offset + length).arrayBuffer());
   }
 
   async close(): Promise<SaveResult> {

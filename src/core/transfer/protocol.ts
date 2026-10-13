@@ -44,6 +44,22 @@ export type ControlMessage =
   | { k: "decline"; id: string }
   | { k: "done"; fid: number; sha256: string }
   | { k: "ok"; fid: number }
+  /**
+   * Whole-file hash mismatch (roadmap: per-chunk repair). Receiver → sender:
+   * the staged bytes failed verification, ask for a repair plan.
+   */
+  | { k: "mismatch"; fid: number }
+  /**
+   * Repair plan (roadmap: per-chunk repair). Sender → receiver: the SHA-256
+   * of every 16 KiB chunk of the source, in order, so the receiver can diff
+   * them against what it staged and name only the bad indices.
+   */
+  | { k: "plan"; fid: number; hashes: string[] }
+  /**
+   * Repair request (roadmap: per-chunk repair). Receiver → sender: re-send
+   * exactly these chunk indices. Single-pass — the receiver never asks twice.
+   */
+  | { k: "repair"; fid: number; indices: number[] }
   | { k: "err"; fid: number; code: ErrorCode }
   | { k: "cancel"; fid: number }
   | { k: "text"; id: string; body: string }
@@ -161,6 +177,25 @@ export function decodeControl(raw: unknown): ControlMessage | null {
     case "ok":
       if (typeof m.fid !== "number") return null;
       return { k: "ok", fid: m.fid };
+    case "mismatch":
+      if (typeof m.fid !== "number") return null;
+      return { k: "mismatch", fid: m.fid };
+    case "plan": {
+      if (typeof m.fid !== "number" || !Array.isArray(m.hashes)) return null;
+      // Bounded by PRD 9.4: a plan can never describe more chunks than the
+      // file has, and every entry must be a lowercase 64-hex digest.
+      const hashes = m.hashes
+        .slice(0, 1_048_576)
+        .filter((h): h is string => typeof h === "string" && /^[0-9a-f]{64}$/.test(h));
+      return { k: "plan", fid: m.fid, hashes };
+    }
+    case "repair": {
+      if (typeof m.fid !== "number" || !Array.isArray(m.indices)) return null;
+      const indices = m.indices
+        .slice(0, 1_048_576)
+        .filter((i): i is number => typeof i === "number" && Number.isInteger(i) && i >= 0);
+      return { k: "repair", fid: m.fid, indices };
+    }
     case "err":
       if (typeof m.fid !== "number" || !isErrorCode(m.code)) return null;
       return { k: "err", fid: m.fid, code: m.code };

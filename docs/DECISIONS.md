@@ -689,3 +689,76 @@ guards the narrower case where the link was never really gone.
   was paid for by dropping the separate grace knob and inlining the
   App-side getter (a `PeerSession.connectionState` getter measured
   12 B worse than reading the existing ref, and was removed).
+
+---
+
+## 2026-10-12 - Per-chunk repair: single-pass rewrite of a corrupt completed file (§19, FR-17)
+
+First slice of the roadmap's `chunk bitmap / hash tree for per-chunk
+repair`. FR-17 said a whole-file mismatch discards the partial file; it
+now asks the peer for per-chunk digests, rewrites only the bad chunks, and
+re-verifies once. The bitmap and the hash tree stay roadmap.
+
+- **Problem:** a corrupted transfer (bad link, bit rot on a stalled chunk)
+  always threw away the whole file. Every byte that landed correctly was
+  re-sent, and a 50 MB transfer paid for one flipped byte.
+- **Choice:** one new handshake, single pass, no retry:
+
+  | step     | message                      | who      |
+  | -------- | ---------------------------- | -------- |
+  | mismatch | `{k:"mismatch",fid}`         | RX -> TX |
+  | digests  | `{k:"plan",fid,hashes[]}`    | TX -> RX |
+  | request  | `{k:"repair",fid,indices[]}` | RX -> TX |
+
+  The sender re-sends exactly the named indices as DATA frames at their
+  original sequence numbers; the receiver rewrites them with
+  `writeAt(seq x 16 KiB, chunk)`, then hashes the whole staged file one
+  final time against the original digest. A second mismatch is terminal.
+  Chunks that never arrived stay `SEQ_GAP` - a digest cannot recreate a
+  chunk that was never sent, so nothing is gained by asking.
+
+- **Reason:** repair is lazily loaded, so the corrupted-transfer path costs
+  the first paint nothing (the two new chunks are 1.2 KB gz combined). The
+  budget is paid for by keeping the handshake out of the bundle and by the
+  re-verified digest, which proves the whole file end to end without a
+  Merkle structure. A single pass bounds the protocol: a peer that keeps
+  corrupting cannot loop, and the timeout on both waits keeps a silent peer
+  from hanging the transfer.
+- **Cost:** three lifecycle bugs were found while making the tests green,
+  all in code the feature shares: calling `sink.readRange` unbound
+  (`this` is undefined inside `MemorySink`), waiting on a promise array
+  that is still empty when the re-sent chunks have not arrived yet, and
+  reading `opts.pongTimeoutMs` for a timeout that is only normalised onto
+  `this.pongTimeoutMs`. The sinks gained optional `writeAt` /
+  `readRange`; a memory-staged file has nothing durable to diff against,
+  so that path stays terminal by design.
+
+---
+
+## 2026-10-12 - Size budget: initial JS means what the document loads
+
+NFR-1's gate now derives "initial" from `index.html` instead of matching
+filenames.
+
+- **Problem:** `scripts/size-budget.mjs` split chunks with a filename
+  regex. It listed `hash` among the lazy patterns, so the hash-wasm
+  inline fallback was _meant_ to be excluded - but Vite names that chunk
+  after the package entry (`index.esm-*.js`), not its contents, so
+  17.9 KB gz of dynamically-imported fallback had always been counted as
+  initial JS. The gate passed only because the app sat just under the
+  number by accident, and any filename-based rule rots the same way.
+- **Choice:** initial JS is the entry module referenced by the document's
+  `<script src>`. Vite bundles every static import into that entry, so
+  anything else in `dist/` is a dynamic `import()` chunk (scanner/QR
+  render, hash worker, the hash-wasm fallback, the settings sheet, the
+  fflate fallback, per-chunk repair) or the hand-written service worker -
+  none of it is parsed before first paint. Those still print as `lazy`
+  so total shipped weight stays visible.
+- **Reason:** the rule now tracks how a chunk is loaded rather than what
+  it happens to be called, so a new dynamic chunk is lazy the moment it is
+  added and a new document entry is counted the moment it appears. The
+  budget itself is unchanged (150 KB gz).
+- **Cost:** the reported initial total drops by the chunks that were never
+  initial, which is why the gate reports more headroom than before. This
+  is a measurement fix, not extra licence: the entry module is still
+  counted whole, and it still grew 4.1 KB gz for per-chunk repair.
