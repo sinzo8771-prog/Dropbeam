@@ -136,6 +136,27 @@ describe("FsaSink (PRD 8.5)", () => {
     expect(suggested).toBe("_.._evil.exe");
     delete host.showSaveFilePicker;
   });
+
+  it("reads staged bytes back for the repair diff (FR-17)", async () => {
+    const fake = fakeWritable();
+    const sink = new FsaSink(fake.handle);
+    await sink.open(META);
+    await sink.write(PAYLOAD);
+    const back = (await sink.readRange!(2, 3))!;
+    expect([...back]).toEqual([3, 4, 5]);
+  });
+
+  it("rewrites a corrupted chunk in place (FR-17)", async () => {
+    const fake = fakeWritable();
+    const sink = new FsaSink(fake.handle);
+    await sink.open(META);
+    await sink.write(PAYLOAD);
+    await sink.writeAt!(2, new Uint8Array([9, 9]));
+    // The rewrite lands at its offset and the rest of the file is untouched.
+    const back = (await sink.readRange!(0, 6))!;
+    expect([...back]).toEqual([1, 2, 9, 9, 5, 6]);
+    expect(fake.bytes).toEqual([1, 2, 9, 9, 5, 6]);
+  });
 });
 
 describe("OpfsSink (PRD 8.5)", () => {
@@ -234,6 +255,39 @@ describe("OpfsSink (PRD 8.5)", () => {
     const resumed = await OpfsSink.resume("photo.jpg", 3);
     await resumed.open({ ...META, name: "photo.jpg" });
     expect([...(await resumed.readPrefix(3))]).toEqual([1, 2, 3]);
+  });
+
+  it("reads staged bytes back for the repair diff (FR-17)", async () => {
+    stubOpfs();
+    const sink = await OpfsSink.create("photo.jpg");
+    await sink.open({ ...META, name: "photo.jpg" });
+    await sink.write(PAYLOAD);
+    const back = (await sink.readRange!(1, 3))!;
+    expect([...back]).toEqual([2, 3, 4]);
+  });
+
+  it("rewrites a corrupted chunk in place (FR-17)", async () => {
+    const stub = stubOpfs();
+    const sink = await OpfsSink.create("photo.jpg");
+    await sink.open({ ...META, name: "photo.jpg" });
+    await sink.write(PAYLOAD);
+    await sink.writeAt!(3, new Uint8Array([9, 9]));
+    // The rewrite lands at its offset; the surrounding bytes survive, both in
+    // the staged file and when read back for the final re-verify.
+    expect(stub.staged).toEqual([1, 2, 3, 9, 9, 6]);
+    const back = (await sink.readRange!(0, 6))!;
+    expect([...back]).toEqual([1, 2, 3, 9, 9, 6]);
+  });
+
+  it("refuses to read or rewrite once the staged file is gone", async () => {
+    stubOpfs();
+    const sink = await OpfsSink.create("photo.jpg");
+    await sink.open({ ...META, name: "photo.jpg" });
+    await sink.write(PAYLOAD);
+    await sink.abort();
+    await expect(sink.readRange!(0, 3)).rejects.toMatchObject({ code: "SINK_UNAVAILABLE" });
+    await expect(sink.writeAt!(0, PAYLOAD)).rejects.toMatchObject({ code: "SINK_UNAVAILABLE" });
+    await expect(sink.readPrefix(3)).rejects.toMatchObject({ code: "SINK_UNAVAILABLE" });
   });
 
   it("removes the staged part file on abort", async () => {
