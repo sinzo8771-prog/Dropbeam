@@ -5,16 +5,18 @@ Codec used per browser pair, plus notes. `DB1` = minimal descriptor (PRD
 
 ## Automated (CI / local)
 
-| Pair                                                                                              | Route                                                       | Codec | Result                                              | Date       |
-| ------------------------------------------------------------------------------------------------- | ----------------------------------------------------------- | ----- | --------------------------------------------------- | ---------- |
-| Real DB1 pipeline ↔ same pipeline                                                                 | same process, WebRTC transport faked                        | DB1   | pass (`npm run ci`)                                 | 2026-10-10 |
-| Chromium ↔ Chromium (same tab)                                                                    | loopback transport, in-app self-test                        | —     | pass (FR-62)                                        | 2026-10-10 |
-| Chromium ↔ Chromium (two browser contexts)                                                        | real WebRTC over loopback, DB1 codes exchanged as text/link | DB1   | pass (`tests/e2e/pairing-transfer.spec.ts`)         | 2026-10-10 |
-| Chromium ↔ Chromium (peer disconnect)                                                             | same pair, host device removed                              | —     | guest reaches `PEER_LOST` with no console errors    | 2026-10-10 |
-| Chromium ↔ Chromium (OPFS save path)                                                              | guest without File System Access                            | —     | file staged and saved (PRD 8.5 Firefox/Safari sink) | 2026-10-10 |
-| Chromium ↔ Firefox (two engines)                                                                  | real WebRTC, DB1 code pasted                                | DB1   | pass (`scripts/interop-matrix.mjs`)                 | 2026-10-10 |
-| Firefox ↔ Chromium (two engines)                                                                  | real WebRTC, DB1 code pasted                                | DB1   | pass (`scripts/interop-matrix.mjs`)                 | 2026-10-10 |
-| Chromium settings sheet (theme, hi, reduce motion, wake lock, STUN, persistence, Devanagari face) | —                                                           | —     | pass (`tests/e2e/settings.spec.ts`)                 | 2026-10-10 |
+| Pair                                                                                              | Route                                                       | Codec | Result                                                           | Date       |
+| ------------------------------------------------------------------------------------------------- | ----------------------------------------------------------- | ----- | ---------------------------------------------------------------- | ---------- |
+| Real DB1 pipeline ↔ same pipeline                                                                 | same process, WebRTC transport faked                        | DB1   | pass (`npm run ci`)                                              | 2026-10-10 |
+| Chromium ↔ Chromium (same tab)                                                                    | loopback transport, in-app self-test                        | —     | pass (FR-62)                                                     | 2026-10-10 |
+| Chromium ↔ Chromium (two browser contexts)                                                        | real WebRTC over loopback, DB1 codes exchanged as text/link | DB1   | pass (`tests/e2e/pairing-transfer.spec.ts`)                      | 2026-10-10 |
+| Chromium ↔ Chromium (peer disconnect)                                                             | same pair, host device removed                              | —     | guest reaches `PEER_LOST` with no console errors                 | 2026-10-10 |
+| Chromium ↔ Chromium (OPFS save path)                                                              | guest without File System Access                            | —     | file staged and saved (PRD 8.5 Firefox/Safari sink)              | 2026-10-10 |
+| Chromium ↔ Firefox (two engines)                                                                  | real WebRTC, DB1 code pasted                                | DB1   | pass (`scripts/interop-matrix.mjs`)                              | 2026-10-10 |
+| Firefox ↔ Chromium (two engines)                                                                  | real WebRTC, DB1 code pasted                                | DB1   | pass (`scripts/interop-matrix.mjs`)                              | 2026-10-10 |
+| Chromium settings sheet (theme, hi, reduce motion, wake lock, STUN, persistence, Devanagari face) | —                                                           | —     | pass (`tests/e2e/settings.spec.ts`)                              | 2026-10-10 |
+| Production build, home screen                                                                     | Lighthouse, mobile profile, STUN off                        | —     | perf 99, a11y 100, bp 100, seo 100 (`scripts/audit-release.mjs`) | 2026-10-13 |
+| Production build, two browser contexts                                                            | network audit of a full pairing + file + note transfer      | DB1   | 14 requests, 0 off-origin (DoD 5)                                | 2026-10-13 |
 
 The first row runs the real `DB1` encode/decode and the full session
 pipeline in one process (only the WebRTC transport is faked — see
@@ -39,6 +41,25 @@ The two cross-engine rows answer the "Chrome ↔ Firefox" manual row with
 the paste route, DB1, matching verification words, guest saving through
 OPFS). They are loopback-on-one-machine, so they prove interop between
 engines — not LAN behaviour or camera QR.
+
+The last two rows are the release audit (`node scripts/audit-release.mjs`,
+against `vite preview`). The Lighthouse row is DoD 8: the mobile profile at
+412x823 scores performance 99 (gate ≥ 90) and accessibility 100 (gate ≥ 95),
+with best-practices and seo at 100. Lighthouse 13 no longer carries a PWA
+category, so installability is not scored there anymore — `npm run
+pwa:health` owns that half of the gate (manifest, service worker, icons,
+shortcuts). The network row is DoD 5: two contexts pair, exchange a file
+and a note, and every one of the 14 requests is same-origin static
+(file://, script, stylesheet, font) with STUN off — nothing leaves the
+device. Both gates pass.
+
+`unused-javascript` is the one audit scoring below 0.9 and is expected:
+the home screen never runs the transfer pipeline, so most of the 135 KB
+initial bundle is unused _on that route_. Splitting it further would move
+latency onto the transfer path to win a number the gates do not measure.
+`llms-txt` and `ai-catalog.json` belong to Lighthouse's agentic-browsing
+category (50), which is about AI crawlers discovering the site and is not
+a DoD requirement for a page that only talks to its paired peer.
 
 The WebKit rows of the manual matrix **cannot** be run here: Playwright's
 WebKit build for Windows ships without `RTCPeerConnection`, so no pairing

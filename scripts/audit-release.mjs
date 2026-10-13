@@ -35,9 +35,9 @@ try {
           deviceScaleFactor: 1.75,
           disabled: false,
         },
-        // The PWA category must see the real service worker; Lighthouse
-        // clears storage between runs, so a second load is required for
-        // the precache to re-populate (handled by its default warmup).
+        // Lighthouse 13 dropped its PWA category, so nothing in this run
+        // measures installability. `npm run pwa:health` owns that half of
+        // DoD 8 (manifest, service worker, icons, shortcuts).
         throttlingMethod: "simulate",
       },
       undefined,
