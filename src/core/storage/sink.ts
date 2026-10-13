@@ -32,8 +32,9 @@ export interface Sink {
   writeAt?(offset: number, bytes: Uint8Array): Promise<void>;
   /**
    * Read `length` bytes starting at `offset` from the staged file, for
-   * re-hashing after a whole-file mismatch. Only disk-backed sinks can do
-   * this; a memory sink returns null and the caller skips per-chunk repair.
+   * re-hashing after a whole-file mismatch. This is one half of the
+   * capability per-chunk repair gates on (PRD FR-17): a sink that omits it
+   * cannot have its bad chunks diffed, and the mismatch then stays terminal.
    */
   readRange?(offset: number, length: number): Promise<Uint8Array | null>;
   close(): Promise<SaveResult>;

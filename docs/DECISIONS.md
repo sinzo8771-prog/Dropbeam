@@ -730,8 +730,9 @@ re-verifies once. The bitmap and the hash tree stay roadmap.
   that is still empty when the re-sent chunks have not arrived yet, and
   reading `opts.pongTimeoutMs` for a timeout that is only normalised onto
   `this.pongTimeoutMs`. The sinks gained optional `writeAt` /
-  `readRange`; a memory-staged file has nothing durable to diff against,
-  so that path stays terminal by design.
+  `readRange`, and the gate checks those two methods rather than the
+  sink's kind: `MemorySink` implements both, so a memory-staged file is
+  repaired too, and only a sink that omits them stays terminal.
 
 ---
 

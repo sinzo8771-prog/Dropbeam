@@ -422,6 +422,40 @@ describe("per-chunk repair (PRD 19)", () => {
     expect(repairs).toEqual([1]);
   });
 
+  it("repairs a memory-staged file too (capability gate, not sink kind)", async () => {
+    let corrupted = false;
+    const { opts, repairs } = countingCorruption({
+      interceptOutgoing: (data) => {
+        if (corrupted || typeof data === "string") return;
+        const view =
+          data instanceof ArrayBuffer
+            ? new Uint8Array(data)
+            : new Uint8Array(
+                (data as Uint8Array).buffer,
+                (data as Uint8Array).byteOffset,
+                (data as Uint8Array).byteLength,
+              );
+        if (view[0] === 0x01 && view.byteLength > 20) {
+          view[20] = (view[20]! ^ 0xff) & 0xff;
+          corrupted = true;
+        }
+      },
+    });
+    // PRD FR-17 gates repair on the sink's methods, not its kind, and
+    // MemorySink implements both — so a memory-staged file is repaired.
+    const h = makeHarness({ channel: opts, createSink: async () => new MemorySink() });
+    const blob = blobOf(64 * 1024);
+    const original = new Uint8Array(await blob.arrayBuffer());
+
+    const done = h.sender.sendFiles([{ blob, name: "memory-repair.bin" }]);
+    await waitFor(() => h.saved.length === 1, { label: "memory repaired save" });
+    await done;
+
+    const received = new Uint8Array(await h.saved[0]!.result.blob!.arrayBuffer());
+    expect(await sha256Hex(received)).toBe(await sha256Hex(original));
+    expect(repairs).toEqual([1]);
+  });
+
   it("requests the bad indices exactly once", async () => {
     let corrupted = false;
     const { opts, repairs } = countingCorruption({
