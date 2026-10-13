@@ -24,6 +24,17 @@ detection, the code-expiry countdown, the font contract (subset per family,
 family names the stacks actually declare), PWA manifest/service worker, and
 the contrast gate computed from the shipped tokens (PRD 13.1).
 
+Two suites guard the storage layer rather than a module. `sinks.test.ts` covers
+each sink's optional per-chunk repair methods (FR-17) — reading staged bytes
+back at an offset, rewriting a chunk in place with its neighbours intact, and
+refusing both once OPFS has aborted and dropped its handle — because repair was
+otherwise only ever driven through a `MemorySink`, leaving the two disk paths
+every desktop and Firefox user takes unverified. `source-hygiene.test.ts` fails
+the suite if any tracked text file carries a control character: a NUL makes git
+treat the file as binary, and a binary file gets no diff for a reviewer to read.
+Which files are text is decided by extension, not by asking git, since a file
+already carrying the byte would be reported binary and quietly skipped.
+
 ## Integration (`tests/integration`)
 
 Two `RTCPeerConnection`s in one page (loopback) transferring: 0-byte file,
