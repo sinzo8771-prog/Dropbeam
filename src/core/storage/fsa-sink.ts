@@ -99,9 +99,7 @@ export class FsaSink implements Sink {
   }
 
   async readRange(offset: number, length: number): Promise<Uint8Array | null> {
-    const handle = this.handle;
-    if (!handle) throw new SinkError("SINK_UNAVAILABLE");
-    return readStagedRange(handle, offset, length);
+    return readStagedRange(this.handle, offset, length);
   }
 
   async close(): Promise<SaveResult> {
