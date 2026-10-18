@@ -1,3 +1,5 @@
+import { SinkError } from "./storage/sink";
+
 /** Error codes from PRD section 12, plus two transfer-level codes. */
 
 export const ERROR_CODES = [
@@ -41,6 +43,12 @@ export class DropbeamError extends Error {
 /** Map an unknown thrown value (sink failures, DOM exceptions) to a code. */
 export function toErrorCode(err: unknown): ErrorCode {
   if (err instanceof DropbeamError) return err.code;
+  // The storage layer has already done this mapping for its own failures
+  // (`mapWriteError`), and its codes are ErrorCodes verbatim. Re-deriving one
+  // from the DOM exception name below would throw that away: a full disk in a
+  // sink would be reported as "sink unavailable", which is a different problem
+  // with different advice for the user.
+  if (err instanceof SinkError) return err.code;
   const name = err instanceof Error ? err.name : "";
   if (name === "QuotaExceededError" || name === "NS_ERROR_DOM_QUOTA_REACHED") return "DISK_FULL";
   if (name === "AbortError") return "CANCELED";

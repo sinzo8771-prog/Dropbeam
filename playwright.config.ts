@@ -16,6 +16,95 @@ import { defineConfig, devices } from "@playwright/test";
  */
 const PORT = 4199;
 
+/**
+ * The one spec that needs a real `RTCPeerConnection`, excluded for the engine
+ * that has none (see the `webkit` entry below).
+ */
+const PAIRING_SPEC = /pairing-transfer\.spec\.ts$/;
+
+/**
+ * The engines this suite can actually drive.
+ *
+ * Chromium is the default: it is the only one that runs everywhere, and the
+ * gate's e2e stage has to give the same answer on a laptop and on a runner.
+ * Firefox is added by setting `E2E_BROWSERS` (the nightly does), because its
+ * WebRTC works — `scripts/interop-matrix.mjs` already pairs it with Chromium
+ * over real connections.
+ *
+ * WebKit is included, but scoped rather than driven whole. It genuinely cannot
+ * pair — Playwright's WebKit build ships without `RTCPeerConnection` on Windows,
+ * and WebKitGTK's `enable-webrtc` setting defaults to false on Linux — so the
+ * pairing spec is excluded for it. Everything else runs, and on WebKit it runs
+ * against the *real* absence of the API: the unsupported-browser messaging, the
+ * connection self-test and the OPFS-detection contract are exercised there with
+ * nothing stubbed, which no other engine can do (`tests/e2e/degradation.spec.ts`
+ * runs on all three, but only WebKit brings the genuine article).
+ *
+ * It is also why WebKit is not a leg of the gate: without the pairing spec it
+ * collects a smaller suite, so its counts cannot be the counts `README.md`
+ * states. The scheduled WebKit job runs `npm run test:webkit` instead, and
+ * `scripts/gate-figures.mjs` refuses `E2E_BROWSERS=webkit` rather than measure
+ * the README against a suite that was never run.
+ */
+const ENGINES = {
+  chromium: { use: devices["Desktop Chrome"] },
+  firefox: { use: devices["Desktop Firefox"] },
+  webkit: { use: devices["Desktop Safari"], testIgnore: PAIRING_SPEC },
+} as const;
+
+/**
+ * Which engine list this run drives.
+ *
+ * `E2E_BROWSERS` when it is set: that is how CI names the leg, and how a
+ * developer runs a second engine locally. Otherwise the npm script's own name,
+ * because `npm run test:webkit` has to mean WebKit — a script that quietly ran
+ * Chromium instead would be the widest possible gap between what a command says
+ * and what it does. The alternative, setting the variable inside the script,
+ * needs a cross-platform env helper this project does not depend on.
+ */
+export function engineList(env: Record<string, string | undefined>): string {
+  if (env.E2E_BROWSERS) return env.E2E_BROWSERS;
+  return env.npm_lifecycle_event === "test:webkit" ? "webkit" : "chromium";
+}
+
+/**
+ * The projects for a comma-separated engine list.
+ *
+ * An unknown name is an error rather than a skipped project, and so is a
+ * non-empty-but-empty list: a typo in the environment variable would otherwise
+ * leave a run green while testing what it already tested, which is the one
+ * outcome a widened run must not produce quietly.
+ */
+export function projectsFor(list: string) {
+  const names = list
+    .split(",")
+    .map((name) => name.trim().toLowerCase())
+    .filter((name) => name.length > 0);
+  if (names.length === 0) {
+    throw new Error(`E2E_BROWSERS is empty; name one of ${Object.keys(ENGINES).join(", ")}`);
+  }
+  const chosen: string[] = [];
+  for (const name of names) {
+    const known = ENGINES[name as keyof typeof ENGINES];
+    if (!known) {
+      throw new Error(
+        `E2E_BROWSERS names ${name}, which is not one of ${Object.keys(ENGINES).join(", ")}`,
+      );
+    }
+    // Repeats collapse rather than running the same engine twice.
+    if (!chosen.includes(name)) chosen.push(name);
+  }
+  return chosen.map((name) => {
+    const engine = ENGINES[name as keyof typeof ENGINES];
+    return {
+      name,
+      use: { ...engine.use },
+      // Only WebKit carries one; the others run every spec in the directory.
+      testIgnore: "testIgnore" in engine ? engine.testIgnore : undefined,
+    };
+  });
+}
+
 export default defineConfig({
   testDir: "./tests/e2e",
   fullyParallel: true,
@@ -26,12 +115,7 @@ export default defineConfig({
     baseURL: `http://localhost:${PORT}`,
     trace: "on-first-retry",
   },
-  projects: [
-    {
-      name: "chromium",
-      use: { ...devices["Desktop Chrome"] },
-    },
-  ],
+  projects: projectsFor(engineList(process.env)),
   webServer: {
     // Build first so the served bundle always matches the source.
     command: `npm run build && npm run preview -- --port ${PORT} --strictPort`,

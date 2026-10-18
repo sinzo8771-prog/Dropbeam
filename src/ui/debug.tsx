@@ -1,6 +1,11 @@
 import { useEffect, useState } from "preact/hooks";
+import { isWebRtcSupported } from "../core/peer/peer-session";
 import type { ConnectionState } from "../core/peer/state-machine";
 import type { StringKey } from "../core/platform/i18n";
+import { isFsaSupported } from "../core/storage/fsa-sink";
+import { isOpfsSupported, probeOpfsWrite } from "../core/storage/opfs-sink";
+import { chooseSink } from "../core/storage/select-sink";
+import type { SinkKind } from "../core/storage/sink";
 
 /**
  * Developer debug panel (M7 / FR-50). Hidden by default: the only
@@ -120,6 +125,57 @@ function usePwaHealth(): PwaHealth {
   return health;
 }
 
+/**
+ * What this browser can do, as the app itself detects it (FR-50).
+ *
+ * Every value comes from the function the real code path runs on — the same
+ * `isWebRtcSupported`, `isFsaSupported`, `isOpfsSupported` and `chooseSink` that
+ * pairing and the storage layer call — so a field report shows the decision this
+ * device actually makes rather than a second opinion about it. The one addition
+ * is `opfsWrite`: reachability and writability are different facts, and the sinks
+ * only test the first.
+ */
+export type Capabilities = {
+  /** `RTCPeerConnection` exists — without it the app cannot transfer at all. */
+  readonly webrtc: boolean;
+  /** File System Access: the native save picker (PRD 8.5). */
+  readonly fsa: boolean;
+  /** The OPFS namespace, which is what `isOpfsSupported` reports. */
+  readonly opfs: boolean;
+  /** Whether that namespace accepted a write; null until the probe answers. */
+  readonly opfsWrite: boolean | null;
+  /** The sink `chooseSink()` would take (PRD 8.5). */
+  readonly sink: SinkKind;
+};
+
+/**
+ * The capabilities, read once per panel mount. The three detections and the sink
+ * choice are synchronous, so they are taken during the first render and stay put;
+ * the write probe is asynchronous and reported as null until it lands, because a
+ * panel that guessed "ok" while probing would be reporting a fact it does not
+ * have.
+ */
+function useCapabilities(): Capabilities {
+  const [detected] = useState(() => ({
+    webrtc: isWebRtcSupported(),
+    fsa: isFsaSupported(),
+    opfs: isOpfsSupported(),
+    sink: chooseSink().kind,
+  }));
+  const [opfsWrite, setOpfsWrite] = useState<boolean | null>(null);
+  useEffect(() => {
+    if (!detected.opfs) return;
+    let cancelled = false;
+    void probeOpfsWrite().then((ok) => {
+      if (!cancelled) setOpfsWrite(ok);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [detected.opfs]);
+  return { ...detected, opfsWrite };
+}
+
 /** Gap between taps that keeps the reveal count accumulating:
     a next tap inside the window continues the count, a tap at or
     past it decays the count to 1. Both boundaries are asserted in
@@ -176,6 +232,7 @@ function Row({ label, value, health }: RowProps) {
 export function DebugPanel({ session, t, onClose }: DebugPanelProps) {
   const buildId = useBuildId();
   const health = usePwaHealth();
+  const caps = useCapabilities();
 
   return (
     <div class="debug-panel" role="region" aria-label={t("debug.title")}>
@@ -197,6 +254,37 @@ export function DebugPanel({ session, t, onClose }: DebugPanelProps) {
           label={t("debug.cache")}
           value={health.cache}
           health={health.cache === "ok" ? "good" : "warn"}
+        />
+        {/* Capabilities: the environment the app decided on, in the same order
+            the sink falls back through. "—" on the write row means the probe has
+            not answered yet; "n/a" means there is no OPFS to write to, which the
+            row above already flags. */}
+        <Row
+          label={t("debug.webrtc")}
+          value={caps.webrtc ? "yes" : "no"}
+          health={caps.webrtc ? "good" : "warn"}
+        />
+        <Row
+          label={t("debug.fsa")}
+          value={caps.fsa ? "yes" : "no"}
+          health={caps.fsa ? "good" : "warn"}
+        />
+        <Row
+          label={t("debug.opfs")}
+          value={caps.opfs ? "yes" : "no"}
+          health={caps.opfs ? "good" : "warn"}
+        />
+        <Row
+          label={t("debug.opfsWrite")}
+          value={
+            !caps.opfs ? "n/a" : caps.opfsWrite === null ? "—" : caps.opfsWrite ? "ok" : "fails"
+          }
+          health={caps.opfsWrite === null ? undefined : caps.opfsWrite ? "good" : "warn"}
+        />
+        <Row
+          label={t("debug.sink")}
+          value={caps.sink}
+          health={caps.sink === "memory" ? "warn" : "good"}
         />
         <Row label={t("debug.state")} value={session.state} />
         <Row

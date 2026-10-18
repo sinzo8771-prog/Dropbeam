@@ -8,8 +8,27 @@ import { expect, type Page, test } from "@playwright/test";
  * These specs drive the real gesture (real mouse events, real
  * timing) against the served production build, so the service
  * worker, its precache and the build id stamped into it are
- * all real — not the stubs the unit tests use.
+ * all real — not the stubs the unit tests use. The capability rows are real for
+ * the same reason, and they are the one engine-keyed part of an otherwise
+ * engine-agnostic suite: they report the browser's own APIs, so the right answer
+ * depends on which browser is running (see the table below and docs/INTEROP.md).
  */
+
+/**
+ * What each engine's capability rows must read.
+ *
+ * These are the detections the transfer path itself runs on, so a change in any
+ * of them changes which sink a device picks — worth failing on rather than
+ * absorbing. File System Access is Chromium-only; the other two stage through
+ * OPFS, which is the PRD 8.5 path Firefox and Safari take.
+ */
+const CAPABILITIES: Record<string, { webrtc: string; fsa: string; opfs: string; sink: string }> = {
+  chromium: { webrtc: "yes", fsa: "yes", opfs: "yes", sink: "fsa" },
+  firefox: { webrtc: "yes", fsa: "no", opfs: "yes", sink: "opfs" },
+  // WebKit cannot pair at all, which is why its project excludes the pairing
+  // spec; for the same reason it has no File System Access.
+  webkit: { webrtc: "no", fsa: "no", opfs: "yes", sink: "opfs" },
+};
 
 /** The gesture zone: the right 52 px of the viewport. */
 const GESTURE_ZONE_PX = 52;
@@ -83,6 +102,26 @@ test.describe("debug panel (FR-50)", () => {
     await expect(row(page, "Service worker")).toHaveAttribute("data-health", "good");
     await expect(row(page, "Cache").locator(".value")).toHaveText("ok");
     await expect(row(page, "Cache")).toHaveAttribute("data-health", "good");
+
+    // What this engine can do, as the app's own detection reports it.
+    const engine = test.info().project.name;
+    const caps = CAPABILITIES[engine];
+    expect(caps, `add ${engine} to the capability table`).toBeTruthy();
+    await expect(row(page, "WebRTC").locator(".value")).toHaveText(caps!.webrtc);
+    await expect(row(page, "File System Access").locator(".value")).toHaveText(caps!.fsa);
+    await expect(row(page, "OPFS").locator(".value")).toHaveText(caps!.opfs);
+    await expect(row(page, "Save sink").locator(".value")).toHaveText(caps!.sink);
+
+    // The write probe has to answer on every engine -- a row stuck on "—"
+    // would mean the probe never settled. On the engines whose transfers stage
+    // through OPFS it must read "ok": the suite's own guest save depends on
+    // that path. On WebKit the verdict is the engine's business (it reads
+    // "fails" on the current build, docs/INTEROP.md), so only the fact that it
+    // answered is pinned; asserting the failure would turn a WebKit fix into a
+    // red build.
+    const write = row(page, "OPFS write").locator(".value");
+    await expect(write).not.toHaveText("—");
+    if (engine !== "webkit") await expect(write).toHaveText("ok");
 
     // A fresh load has no active session.
     await expect(row(page, "Connection state").locator(".value")).toHaveText("IDLE");

@@ -450,19 +450,53 @@ export class Receiver {
       this.events.onError?.(meta.fid, "SINK_UNAVAILABLE");
       throw new DropbeamError("SINK_UNAVAILABLE", "cannot resume this file");
     }
-    const sink = resuming
-      ? await this.opts.resumeSink!(sinkMeta, chunkOffset(chunks))
-      : this.opts.createSink
-        ? await this.opts.createSink(sinkMeta)
-        : new MemorySink();
+    // Building the sink and opening it are one guarded step: a sink that
+    // cannot be built and one that cannot be opened are the same outcome for
+    // the user, and what decides the recovery is whether a byte has landed
+    // yet — which, this early, it never has.
+    let sink: Sink | null = null;
     try {
+      sink = resuming
+        ? await this.opts.resumeSink!(sinkMeta, chunkOffset(chunks))
+        : this.opts.createSink
+          ? await this.opts.createSink(sinkMeta)
+          : new MemorySink();
       await sink.open(sinkMeta);
     } catch (err) {
+      // Kept before the fallback overwrites `sink`: a refused sink may have
+      // created a staging file (an empty `.part` in OPFS) that has to go.
+      const refused = sink;
       const code = toErrorCode(err) === "INTERNAL" ? "SINK_UNAVAILABLE" : toErrorCode(err);
-      this.channel.send(encodeControl({ k: "err", fid: meta.fid, code }));
-      this.events.onPhase?.(meta.fid, "FAILED");
-      this.events.onError?.(meta.fid, code);
-      throw err instanceof DropbeamError ? err : new DropbeamError(code);
+      sink = null;
+      // One last resort for a file with nothing staged yet: the sink refused
+      // before a single byte landed, so memory can still take it whole (PRD
+      // 8.5's fallback order ends there anyway). A resumed transfer is
+      // excluded — its prefix lives in the sink that just refused, and
+      // continuing the tail into RAM would produce a file with a hole in it —
+      // and so is a cancellation, which is the user's decision rather than the
+      // storage layer failing.
+      //
+      // This is the measured WebKit shape (docs/INTEROP.md): the OPFS
+      // namespace exists, so the sink is selected, and every `createWritable`
+      // throws. Without this the file fails for a capability the browser
+      // advertised, and nothing was wrong with the transfer.
+      if (!resuming && code !== "CANCELED") {
+        const memory = new MemorySink();
+        try {
+          await memory.open(sinkMeta);
+          sink = memory;
+        } catch {
+          // Too large for the memory cap: report the sink's own reason, which
+          // is the informative one (a full disk, not a full RAM budget).
+        }
+      }
+      if (sink === null) {
+        this.channel.send(encodeControl({ k: "err", fid: meta.fid, code }));
+        this.events.onPhase?.(meta.fid, "FAILED");
+        this.events.onError?.(meta.fid, code);
+        throw err instanceof DropbeamError ? err : new DropbeamError(code);
+      }
+      if (refused) await refused.abort().catch(() => undefined);
     }
     const hasher = await createHasher();
     if (resuming) {

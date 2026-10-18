@@ -39,6 +39,62 @@ function supportsPositionedWrite(w: OpfsWritable): boolean {
   return typeof w.write === "function";
 }
 
+/** Scratch name for the write probe: recognisable, and never a staged file. */
+const PROBE_NAME = ".write-probe";
+
+type ProbeDir = {
+  getFileHandle(name: string, opts: { create: boolean }): Promise<OpfsHandle>;
+  removeEntry(name: string): Promise<void>;
+};
+
+/**
+ * Whether OPFS can actually be *written to*, not merely reached (FR-50).
+ *
+ * `isOpfsSupported` answers whether the namespace exists, which is all sink
+ * selection needs and is a different question: some builds expose
+ * `navigator.storage.getDirectory` while `createWritable` throws for every
+ * handle they hand out. That gap is not hypothetical — Playwright's WebKit build
+ * has the namespace and nothing else (docs/INTEROP.md) — and it is exactly the
+ * gap that decides whether an incoming file stages to disk or fails mid-transfer
+ * instead of falling back to memory. So the debug panel reports reachability and
+ * writability as two separate facts rather than letting one stand in for the
+ * other, and this is the second one.
+ *
+ * Deliberately best-effort: the scratch file is removed on every path, and a
+ * failure is `false` rather than a throw, because a diagnostic must never be the
+ * thing that breaks a session. It costs one small file in the staging directory.
+ */
+export async function probeOpfsWrite(): Promise<boolean> {
+  if (!isOpfsSupported()) return false;
+  const storage = (
+    globalThis.navigator as Navigator & {
+      storage: { getDirectory(): Promise<unknown> };
+    }
+  ).storage;
+  let dir: ProbeDir | undefined;
+  try {
+    const root = (await storage.getDirectory()) as {
+      getDirectoryHandle(name: string, opts: { create: boolean }): Promise<unknown>;
+    };
+    dir = (await root.getDirectoryHandle(STAGING_DIR, { create: true })) as ProbeDir;
+    const handle = await dir.getFileHandle(PROBE_NAME, { create: true });
+    const writable = await handle.createWritable();
+    await writable.write(new Uint8Array([0x44, 0x62]));
+    await writable.close();
+    return true;
+  } catch {
+    return false;
+  } finally {
+    // Best effort, and after a failure too: a probe must not leave a file
+    // behind that a later run could mistake for a staged transfer.
+    try {
+      await dir?.removeEntry(PROBE_NAME);
+    } catch {
+      // No OPFS to clean up, or it cannot be written to at all.
+    }
+  }
+}
+
 export class OpfsSink implements Sink {
   readonly kind = "opfs" as const;
   private writable: OpfsWritable | null = null;

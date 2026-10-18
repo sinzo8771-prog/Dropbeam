@@ -4,24 +4,92 @@ on:
   push:
     branches: [main]
   pull_request:
+  # Nightly, because a push or PR trigger only ever exercises the runner when
+  # something changed in this repository. The runner environment - the Ubuntu
+  # image, the Chromium build, what npm hands back - drifts on its own, and a
+  # schedule is the only trigger that sees that. It is also where the Linux
+  # half of the README's figures gets checked: locally they are measured and
+  # written, and with CI set they are verified, so a count that differed by
+  # platform would surface here instead of on somebody's laptop.
+  #
+  # Times are UTC, and deliberately not on the hour: GitHub's scheduled runs
+  # queue behind the rest of the world at :00 and can be delayed or dropped
+  # there. It also disables scheduled workflows after 60 days without
+  # repository activity and emails the owner, so a nightly that has quietly
+  # stopped is a thing to check rather than assume.
+  schedule:
+    - cron: "17 3 * * *"
 
 jobs:
   build-and-test:
+    runs-on: ubuntu-latest
+    # One leg on a push or a PR: the answer that diff deserves, as fast as it can
+    # be given. The nightly widens both axes, because those combinations are
+    # about drift rather than about the change in hand - the other Node line, and
+    # the second engine. Every leg runs the one gate command; only the
+    # environment differs, and the matrix is what makes that environment visible
+    # in the report.
+    strategy:
+      fail-fast: false
+      matrix:
+        node: ${{ github.event_name == 'schedule' && fromJSON('["22", "24"]') || fromJSON('["22"]') }}
+        engine: ${{ github.event_name == 'schedule' && fromJSON('["chromium", "firefox"]') || fromJSON('["chromium"]') }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+      - run: npm ci
+      # The browser is a prerequisite of the gate, not a stage of it: the e2e
+      # specs and the release audit both drive a real browser. --with-deps also
+      # pulls the system libraries Chromium needs on the hosted runner, and the
+      # leg's own engine is the only one downloaded.
+      - run: npx playwright install --with-deps ${{ matrix.engine }}
+      # The gate itself, taken verbatim from package.json. Spelling the
+      # stages out here instead is how this job fell behind `npm run ci`
+      # before - it never ran pwa:health, and nothing could notice, because
+      # the list lived in two places. One command, one source of truth.
+      - run: npm run ci
+        env:
+          # Which engine the e2e stage drives (see playwright.config.ts). The
+          # specs are engine-agnostic, so every leg collects the same tests and
+          # measures the same figures - which is why every leg also checks the
+          # README against them rather than stepping around them.
+          E2E_BROWSERS: ${{ matrix.engine }}
+
+  # The third engine, which is not a leg of the gate.
+  #
+  # Playwright's WebKit build has no RTCPeerConnection, so it cannot run the
+  # pairing spec at all and its project excludes it - see playwright.config.ts.
+  # That leaves it collecting fewer tests than README.md states, which is why it
+  # is a separate job running `test:webkit` and not another matrix engine: an
+  # engine axis entry would fail the gate's own figure check for a difference
+  # that is structural rather than a regression. `scripts/gate-figures.mjs`
+  # refuses a WebKit gate run outright, and the parity suite pins that too.
+  #
+  # Scheduled only, like the widened matrix legs: this run is about a browser
+  # build drifting under the suite, not about the change in hand. It is also the
+  # only place the app meets a real absence of WebRTC - the unsupported-browser
+  # messaging and the connection self-test run there with nothing stubbed, while
+  # the pull requests covering that same behaviour do it with the API removed by
+  # an init script (tests/e2e/degradation.spec.ts).
+  webkit:
+    if: github.event_name == 'schedule'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
+          # One Node line: the matrix above already covers the other, and the
+          # variable this job exists to exercise is the engine.
+          node-version: "22"
           cache: npm
       - run: npm ci
-      - run: npm run lint
-      - run: npm run typecheck
-      - run: npm test
-      - run: npm run build
-      - run: npm run size
-      # Installs the Chromium binary for the e2e specs in tests/e2e;
-      # --with-deps also pulls the system libraries Chromium needs on
-      # the GitHub-hosted runner.
-      - run: npx playwright install --with-deps chromium
-      - run: npm run test:e2e
+      - run: npx playwright install --with-deps webkit
+      - run: npm run test:webkit
+        env:
+          # The script name would select WebKit on its own (see `engineList` in
+          # playwright.config.ts); naming it here keeps the leg's engine in the
+          # workflow, where the matrix above puts it for every other engine.
+          E2E_BROWSERS: webkit

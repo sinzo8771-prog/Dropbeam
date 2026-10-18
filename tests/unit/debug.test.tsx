@@ -63,9 +63,53 @@ function row(container: Element, label: string) {
 describe("DebugPanel (FR-50)", () => {
   afterEach(() => {
     vi.unstubAllEnvs();
+    vi.unstubAllGlobals();
+    // `delete`, not `vi.unstubAllGlobals`: this one is defined by hand so the
+    // app's own `isFsaSupported` sees exactly what the app would see.
+    delete (globalThis as Record<string, unknown>).showSaveFilePicker;
     stubCaches(undefined);
     stubServiceWorker(null);
+    stubCapabilities({});
   });
+
+  /**
+   * Stub the capabilities the panel reads: the globals the app's own detection
+   * functions test (`RTCPeerConnection`, `showSaveFilePicker`, OPFS), so the
+   * panel reports a stubbed browser exactly as it would report that browser.
+   * `opfs` is a directory stand-in: deadline pending, working, or unwritable.
+   */
+  function stubCapabilities(opts: {
+    webrtc?: boolean;
+    fsa?: boolean;
+    opfs?: "working" | "unwritable" | "pending";
+  }): void {
+    if (opts.webrtc) vi.stubGlobal("RTCPeerConnection", class {});
+    if (opts.fsa) {
+      Object.defineProperty(globalThis, "showSaveFilePicker", {
+        value: () => {},
+        configurable: true,
+      });
+    }
+    if (!opts.opfs) {
+      Object.defineProperty(navigator, "storage", { value: undefined, configurable: true });
+      return;
+    }
+    const getDirectory = async () => {
+      if (opts.opfs === "pending") return new Promise(() => {});
+      return {
+        getDirectoryHandle: async () => ({
+          getFileHandle: async () => ({
+            createWritable: async () => {
+              if (opts.opfs === "unwritable") throw new Error("unknown error");
+              return { write: async () => {}, close: async () => {} };
+            },
+          }),
+          removeEntry: async () => {},
+        }),
+      };
+    };
+    Object.defineProperty(navigator, "storage", { value: { getDirectory }, configurable: true });
+  }
 
   it("reports build id, service worker and cache health", async () => {
     stubCaches(fakeCaches(["dropbeam-muvjey82"], 4));
@@ -201,6 +245,104 @@ describe("DebugPanel (FR-50)", () => {
     const { container } = render(<DebugPanel session={session()} t={t} onClose={() => {}} />);
     await waitFor(() => expect(row(container, "Service worker")?.value).toBe("uncontrolled"));
     expect(row(container, "Build id")?.value).toBe("—");
+  });
+
+  it("reports what this browser can do, from the app's own detection", async () => {
+    stubCaches(fakeCaches(["dropbeam-muvjey82"]));
+    stubServiceWorker({});
+    stubCapabilities({ webrtc: true, fsa: true, opfs: "working" });
+    const { container } = render(<DebugPanel session={session()} t={t} onClose={() => {}} />);
+
+    // The write probe is asynchronous, so the rows are waited on: the sink and
+    // the three detections are known on the first render.
+    await waitFor(() => expect(row(container, "OPFS write")?.value).toBe("ok"));
+    expect(row(container, "WebRTC")).toEqual({
+      label: "WebRTC",
+      value: "yes",
+      health: "good",
+    });
+    expect(row(container, "File System Access")).toEqual({
+      label: "File System Access",
+      value: "yes",
+      health: "good",
+    });
+    expect(row(container, "OPFS")).toEqual({ label: "OPFS", value: "yes", health: "good" });
+    expect(row(container, "OPFS write")).toEqual({
+      label: "OPFS write",
+      value: "ok",
+      health: "good",
+    });
+    // The sink row is chooseSink()'s own answer: with File System Access
+    // present that is the picker path, not the fallbacks below it.
+    expect(row(container, "Save sink")).toEqual({
+      label: "Save sink",
+      value: "fsa",
+      health: "good",
+    });
+  });
+
+  it("flags a browser that can only stage in memory", async () => {
+    stubCaches(fakeCaches(["dropbeam-muvjey82"]));
+    stubServiceWorker({});
+    stubCapabilities({});
+    const { container } = render(<DebugPanel session={session()} t={t} onClose={() => {}} />);
+
+    // No OPFS at all: the write row says there is nothing to write to, and the
+    // reachability row above it carries the warning rather than both.
+    await waitFor(() => expect(row(container, "Save sink")?.value).toBe("memory"));
+    expect(row(container, "WebRTC")).toEqual({ label: "WebRTC", value: "no", health: "warn" });
+    expect(row(container, "File System Access")).toEqual({
+      label: "File System Access",
+      value: "no",
+      health: "warn",
+    });
+    expect(row(container, "OPFS")).toEqual({ label: "OPFS", value: "no", health: "warn" });
+    expect(row(container, "OPFS write")).toEqual({
+      label: "OPFS write",
+      value: "n/a",
+      health: null,
+    });
+    expect(row(container, "Save sink")).toEqual({
+      label: "Save sink",
+      value: "memory",
+      health: "warn",
+    });
+  });
+
+  it("reports the split between OPFS reachable and OPFS writable", async () => {
+    // The measured WebKit shape: the namespace is there and every write throws.
+    // Reachability alone would report a healthy sink that cannot save a byte,
+    // which is the whole reason these are two rows.
+    stubCaches(fakeCaches(["dropbeam-muvjey82"]));
+    stubServiceWorker({});
+    stubCapabilities({ webrtc: true, opfs: "unwritable" });
+    const { container } = render(<DebugPanel session={session()} t={t} onClose={() => {}} />);
+
+    await waitFor(() => expect(row(container, "OPFS write")?.value).toBe("fails"));
+    expect(row(container, "OPFS")).toEqual({ label: "OPFS", value: "yes", health: "good" });
+    expect(row(container, "OPFS write")).toEqual({
+      label: "OPFS write",
+      value: "fails",
+      health: "warn",
+    });
+    // The sink the app would take is still OPFS - it is selected by
+    // reachability, which is why the contradiction is worth reporting.
+    expect(row(container, "Save sink")?.value).toBe("opfs");
+  });
+
+  it("keeps the write row unknown until the probe answers", async () => {
+    stubCaches(fakeCaches(["dropbeam-muvjey82"]));
+    stubServiceWorker({});
+    stubCapabilities({ opfs: "pending" });
+    const { container } = render(<DebugPanel session={session()} t={t} onClose={() => {}} />);
+
+    // A panel that guessed "ok" while probing would be reporting a fact it
+    // does not have yet.
+    expect(row(container, "OPFS write")).toEqual({
+      label: "OPFS write",
+      value: "—",
+      health: null,
+    });
   });
 
   it("closes from the Close button", () => {

@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
+import { toErrorCode } from "../../src/core/errors";
 import { FsaSink, isFsaSupported, mapWriteError } from "../../src/core/storage/fsa-sink";
-import { OpfsSink, isOpfsSupported } from "../../src/core/storage/opfs-sink";
+import { OpfsSink, isOpfsSupported, probeOpfsWrite } from "../../src/core/storage/opfs-sink";
 import { MemorySink } from "../../src/core/storage/memory-sink";
 import { chooseSink, createSinkFor } from "../../src/core/storage/select-sink";
 import { SinkError, type SinkMeta } from "../../src/core/storage/sink";
@@ -306,6 +307,92 @@ describe("OpfsSink (PRD 8.5)", () => {
       code: "SINK_UNAVAILABLE",
     });
   });
+
+  /**
+   * The write probe (FR-50): `isOpfsSupported` says the namespace exists, and
+   * this says whether anything can actually be written through it. The two
+   * answers differ on real builds — Playwright's WebKit exposes
+   * `getDirectory` and throws from `createWritable` (docs/INTEROP.md) — so the
+   * failure modes below are shaped like the ones a device reports.
+   */
+  describe("probeOpfsWrite (FR-50 diagnostics)", () => {
+    /** The staging directory a probe would see, and what it did to it. */
+    function stubProbeDir(mode: "ok" | "unwritable" | "writeFails" = "ok") {
+      const created: string[] = [];
+      const removed: string[] = [];
+      const written: number[] = [];
+      setNavigatorStorage({
+        getDirectory: async () => ({
+          getDirectoryHandle: async () => ({
+            getFileHandle: async (name: string, opts?: { create?: boolean }) => {
+              if (opts?.create) created.push(name);
+              return {
+                createWritable: async () => {
+                  // The measured WebKit shape: the handle exists, the writable
+                  // does not.
+                  if (mode === "unwritable") throw new Error("unknown error");
+                  return {
+                    write: async (chunk: unknown) => {
+                      if (mode === "writeFails") throw new Error("unknown error");
+                      written.push(...toBytes(chunk));
+                    },
+                    close: async () => {},
+                  };
+                },
+              };
+            },
+            removeEntry: async (name: string) => {
+              removed.push(name);
+            },
+          }),
+        }),
+      });
+      return { created, removed, written };
+    }
+
+    it("writes a scratch file, then removes it", async () => {
+      const dir = stubProbeDir();
+      expect(await probeOpfsWrite()).toBe(true);
+      // The two bytes it wrote, into a file it named itself...
+      expect(dir.written).toEqual([0x44, 0x62]);
+      expect(dir.created).toEqual([".write-probe"]);
+      // ...and cleaned up, so a probe can never be mistaken for a staged file.
+      expect(dir.removed).toEqual([".write-probe"]);
+    });
+
+    it("reports false when the namespace exists but cannot be written", async () => {
+      const dir = stubProbeDir("unwritable");
+      expect(await probeOpfsWrite()).toBe(false);
+      // The file was created before the writable failed, so the cleanup still
+      // has to run.
+      expect(dir.created).toEqual([".write-probe"]);
+      expect(dir.removed).toEqual([".write-probe"]);
+    });
+
+    it("reports false when the write itself fails, and still cleans up", async () => {
+      const dir = stubProbeDir("writeFails");
+      expect(await probeOpfsWrite()).toBe(false);
+      expect(dir.removed).toEqual([".write-probe"]);
+    });
+
+    it("reports false without a namespace, and never throws", async () => {
+      // No OPFS at all: the probe must not be the thing that breaks a session.
+      setNavigatorStorage({});
+      expect(await probeOpfsWrite()).toBe(false);
+      setNavigatorStorage(undefined);
+      expect(await probeOpfsWrite()).toBe(false);
+    });
+
+    it("reports false when the directory cannot even be opened", async () => {
+      // Private mode and denied storage land here.
+      setNavigatorStorage({
+        getDirectory: async () => {
+          throw new Error("storage is not available");
+        },
+      });
+      expect(await probeOpfsWrite()).toBe(false);
+    });
+  });
 });
 
 describe("sink selection (PRD 8.5)", () => {
@@ -367,5 +454,17 @@ describe("sink selection (PRD 8.5)", () => {
       }),
     ).rejects.toMatchObject({ code: "CANCELED" });
     delete host.showSaveFilePicker;
+  });
+});
+
+describe("sink reason codes (PRD 12)", () => {
+  it("carries a sink's own code through toErrorCode", () => {
+    // `toErrorCode` is what puts the reason on the wire, and without this it
+    // reads a SinkError's DOM-style name instead: every code `mapWriteError`
+    // assigns would collapse into "sink unavailable", so a full disk would be
+    // reported as a missing API - a different problem, with different advice.
+    expect(toErrorCode(new SinkError("DISK_FULL"))).toBe("DISK_FULL");
+    expect(toErrorCode(new SinkError("SINK_UNAVAILABLE"))).toBe("SINK_UNAVAILABLE");
+    expect(toErrorCode(new SinkError("CANCELED"))).toBe("CANCELED");
   });
 });

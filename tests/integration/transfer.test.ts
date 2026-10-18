@@ -1,10 +1,14 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { DropbeamError } from "../../src/core/errors";
 import { MemorySink } from "../../src/core/storage/memory-sink";
-import type { SaveResult, Sink, SinkMeta } from "../../src/core/storage/sink";
+import { MEMORY_SINK_CAP } from "../../src/core/storage/limits";
+import { OpfsSink } from "../../src/core/storage/opfs-sink";
+import { SinkError, type SaveResult, type Sink, type SinkMeta } from "../../src/core/storage/sink";
 import { MemoryChannel, waitFor, type MemoryChannelOptions } from "../helpers/memory-channel";
 import { Sender } from "../../src/core/transfer/sender";
 import { Receiver, type IncomingOffer } from "../../src/core/transfer/receiver";
+import { encodeControl } from "../../src/core/transfer/protocol";
+import { ResumeStore } from "../../src/core/transfer/resume-store";
 import type { FilePhase } from "../../src/core/transfer/phase";
 
 type Harness = {
@@ -31,6 +35,8 @@ function makeHarness(
     pongTimeoutMs?: number;
     pcState?: () => RTCPeerConnectionState | undefined;
     createSink?: (meta: SinkMeta) => Sink | Promise<Sink>;
+    resumeSink?: (meta: SinkMeta, resumeFromBytes: number) => Sink | Promise<Sink>;
+    store?: ResumeStore;
   } = {},
 ): Harness {
   const [txChannel, rxChannel] = MemoryChannel.pair(opts.channel ?? {});
@@ -62,6 +68,8 @@ function makeHarness(
       ...(opts.pongTimeoutMs !== undefined ? { pongTimeoutMs: opts.pongTimeoutMs } : {}),
       ...(opts.pcState !== undefined ? { pcState: opts.pcState } : {}),
       ...(opts.createSink !== undefined ? { createSink: opts.createSink } : {}),
+      ...(opts.resumeSink !== undefined ? { resumeSink: opts.resumeSink } : {}),
+      ...(opts.store !== undefined ? { store: opts.store } : {}),
     },
   );
   h.sender = new Sender(
@@ -544,5 +552,179 @@ describe("per-chunk repair (PRD 19)", () => {
     expect(h.errors.some((e) => e.code === "HASH_MISMATCH")).toBe(true);
     // A read-back-incapable sink never even asks for a plan.
     expect(repairs.length).toBe(0);
+  });
+});
+
+describe("a sink that refuses the file (PRD 8.5, FR-31)", () => {
+  /**
+   * A sink that cannot be opened — the measured WebKit shape, where the OPFS
+   * namespace exists so the sink is *selected*, and every `createWritable`
+   * throws (docs/INTEROP.md). Reachability and writability are different
+   * questions, and this is the second one failing.
+   */
+  function unwritableSink(code: "SINK_UNAVAILABLE" | "DISK_FULL") {
+    const state = { aborted: false, writes: 0 };
+    const sink: Sink = {
+      kind: "opfs",
+      open: async () => {
+        throw new SinkError(code);
+      },
+      write: async () => {
+        state.writes += 1;
+        throw new SinkError(code);
+      },
+      close: async () => {
+        throw new SinkError(code);
+      },
+      abort: async () => {
+        state.aborted = true;
+      },
+    };
+    return { sink, state };
+  }
+
+  /** An offer straight onto the wire, so a case needs no matching sender. */
+  function sendOffer(
+    h: Harness,
+    file: { fid: number; name: string; size: number; chunks?: number },
+  ): void {
+    h.txChannel.send(
+      encodeControl({
+        k: "offer",
+        id: "raw-offer",
+        files: [{ type: "application/octet-stream", ...file }],
+        totalSize: file.size,
+      }),
+    );
+  }
+
+  it("falls back to memory when the chosen sink cannot be opened", async () => {
+    const refused = unwritableSink("DISK_FULL");
+    const h = makeHarness({ createSink: () => refused.sink });
+    const blob = blobOf(64 * 1024);
+    const original = new Uint8Array(await blob.arrayBuffer());
+
+    const done = h.sender.sendFiles([{ blob, name: "rescue.bin" }]);
+    await waitFor(() => h.saved.length === 1, { label: "saved" });
+    await done;
+
+    // The file arrived whole, and the result says where it actually went.
+    const saved = h.saved[0]!;
+    expect(saved.result.sink).toBe("memory");
+    expect(saved.result.size).toBe(original.byteLength);
+    const received = new Uint8Array(await saved.result.blob!.arrayBuffer());
+    expect(await sha256Hex(received)).toBe(await sha256Hex(original));
+    expect(h.rxPhases.get(1)).toBe("DONE");
+    expect(h.txPhases.get(1)).toBe("DONE");
+    // A fallback is not a failure: nothing is reported on either side.
+    expect(h.errors).toEqual([]);
+    // The refused sink wrote nothing, and its staging file is gone.
+    expect(refused.state.writes).toBe(0);
+    expect(refused.state.aborted).toBe(true);
+  });
+
+  it("reports the sink's own reason when memory cannot take the file either", async () => {
+    const refused = unwritableSink("DISK_FULL");
+    const h = makeHarness({ createSink: () => refused.sink });
+
+    // A file past the in-memory cap, declared in the offer: nothing has to be
+    // sent for the receiver to refuse it, because MemorySink.open checks the
+    // announced size (FR-31).
+    sendOffer(h, { fid: 1, name: "huge.bin", size: MEMORY_SINK_CAP + 1 });
+
+    await waitFor(() => h.errors.length === 1, { label: "reported" });
+    // The disk's reason, not memory's: it is the informative one.
+    expect(h.errors[0]).toMatchObject({ fid: 1, code: "DISK_FULL" });
+    expect(h.rxPhases.get(1)).toBe("FAILED");
+    expect(h.saved).toEqual([]);
+  });
+
+  it("survives the real OPFS sink refusing to write (the measured WebKit shape)", async () => {
+    // The whole chain, with no double in place of the sink: the namespace
+    // answers, `createWritable` throws `UnknownError` exactly as Playwright's
+    // WebKit build does (docs/INTEROP.md), the sink's own mapping turns that
+    // into DISK_FULL, and the file still arrives — in memory.
+    const descriptor = Object.getOwnPropertyDescriptor(globalThis, "navigator");
+    Object.defineProperty(globalThis, "navigator", {
+      value: {
+        ...(globalThis.navigator as object),
+        storage: {
+          getDirectory: async () => ({
+            getDirectoryHandle: async () => ({
+              getFileHandle: async () => ({
+                createWritable: async () => {
+                  throw new DOMException(
+                    "the operation failed for an unknown reason",
+                    "UnknownError",
+                  );
+                },
+                remove: async () => {},
+              }),
+              removeEntry: async () => {},
+            }),
+          }),
+        },
+      },
+      configurable: true,
+      writable: true,
+    });
+    try {
+      const h = makeHarness({ createSink: (meta) => OpfsSink.create(meta.name) });
+      const blob = blobOf(48 * 1024);
+      const original = new Uint8Array(await blob.arrayBuffer());
+
+      const done = h.sender.sendFiles([{ blob, name: "webkit-shape.bin" }]);
+      await waitFor(() => h.saved.length === 1, { label: "saved" });
+      await done;
+
+      const saved = h.saved[0]!;
+      expect(saved.result.sink).toBe("memory");
+      const received = new Uint8Array(await saved.result.blob!.arrayBuffer());
+      expect(await sha256Hex(received)).toBe(await sha256Hex(original));
+      expect(h.errors).toEqual([]);
+    } finally {
+      if (descriptor) Object.defineProperty(globalThis, "navigator", descriptor);
+    }
+  });
+
+  it("never restarts a resumed transfer into memory", async () => {
+    const store = new ResumeStore();
+    // A parked partial, whose prefix lives in the sink about to refuse again.
+    store.parkInbound({ fid: 3, name: "half.bin", size: 16384, chunks: 1, sink: "opfs" });
+    const h = makeHarness({
+      store,
+      resumeSink: async () => {
+        throw new SinkError("SINK_UNAVAILABLE");
+      },
+    });
+
+    // The peer re-offers the same file from chunk 1.
+    sendOffer(h, { fid: 1, name: "half.bin", size: 16384, chunks: 1 });
+
+    await waitFor(() => h.errors.length === 1, { label: "reported" });
+    expect(h.errors[0]).toMatchObject({ fid: 1, code: "SINK_UNAVAILABLE" });
+    expect(h.rxPhases.get(1)).toBe("FAILED");
+    // Restarting the tail in RAM would have produced a file missing its head,
+    // so memory is never a fallback here — and the partial is still parked for
+    // a later session to resume properly.
+    expect(h.saved).toEqual([]);
+    expect(store.inboundFor("half.bin", 16384)).toBeTruthy();
+  });
+
+  it("does not quietly stage a cancelled pick in memory", async () => {
+    // A dismissed save picker is the user's decision, not a storage failure,
+    // so it is reported as cancelled rather than absorbed into RAM behind them.
+    const h = makeHarness({
+      createSink: async () => {
+        throw new DropbeamError("CANCELED", "picker dismissed");
+      },
+    });
+
+    sendOffer(h, { fid: 1, name: "chosen.bin", size: 4096 });
+
+    await waitFor(() => h.errors.length === 1, { label: "reported" });
+    expect(h.errors[0]).toMatchObject({ fid: 1, code: "CANCELED" });
+    expect(h.rxPhases.get(1)).toBe("FAILED");
+    expect(h.saved).toEqual([]);
   });
 });

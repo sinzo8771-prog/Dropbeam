@@ -5,6 +5,16 @@
   "private": false,
   "license": "MIT",
   "type": "module",
+  "gate": [
+    "typecheck",
+    "lint",
+    "test",
+    "build",
+    "size",
+    "pwa:health",
+    "test:e2e",
+    "audit:release"
+  ],
   "scripts": {
     "dev": "vite",
     "build": "tsc --noEmit && vite build && node scripts/postbuild.mjs",
@@ -18,9 +28,13 @@
     "test:integration": "vitest run tests/integration",
     "test:watch": "vitest",
     "test:e2e": "playwright test",
+    "test:webkit": "playwright test",
     "size": "node scripts/size-budget.mjs",
     "pwa:health": "node scripts/pwa-health.mjs",
-    "ci": "npm run typecheck && npm run lint && npm run test && npm run build && npm run size && npm run pwa:health && npm run test:e2e"
+    "audit:release": "node scripts/audit-release.mjs",
+    "docs:figures": "node scripts/gate.mjs --write",
+    "docs:figures:check": "node scripts/gate.mjs --check",
+    "ci": "node scripts/gate.mjs"
   },
   "dependencies": {
     "fflate": "0.8.3",
