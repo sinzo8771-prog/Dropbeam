@@ -15,17 +15,18 @@ import { engineList, projectsFor } from "../../playwright.config";
  *
  * WebKit is the exception that proves that rule, and the reason it is scoped
  * rather than refused. It cannot run the pairing spec - Playwright's WebKit build
- * ships without `RTCPeerConnection` - so it collects fewer tests than the README
- * states. Rather than start a run that would fail for a cause nobody here can
- * fix (the old behaviour) or quietly test Chromium under WebKit's name, its
- * project excludes that one spec and is kept off the gate: the scheduled job runs
- * `npm run test:webkit`, and `scripts/gate-figures.mjs` refuses a WebKit gate run
- * outright.
+ * ships without `RTCPeerConnection` - and it cannot navigate while the network is
+ * emulated down, which is what the offline spec needs. So it collects fewer tests
+ * than the README states. Rather than start a run that would fail for a cause
+ * nobody here can fix (the old behaviour) or quietly test Chromium under WebKit's
+ * name, its project excludes those two specs and is kept off the gate: the
+ * scheduled job runs `npm run test:webkit`, and `scripts/gate-figures.mjs` refuses
+ * a WebKit gate run outright.
  *
- * What is pinned below is the shape of that arrangement: the scoping is exactly
- * one spec wide and self-updating as specs are added, the default and the nightly
- * legs are untouched, and the engine name a run is asked for is the engine it
- * gets - including the script-name fallback that makes `npm run test:webkit` mean
+ * What is pinned below is the shape of that arrangement: the excluded specs are
+ * named explicitly and self-update as specs are added, the default and the nightly
+ * legs are untouched, and the engine name a run is asked for is the engine it gets
+ * — including the script-name fallback that makes `npm run test:webkit` mean
  * WebKit on any platform.
  *
  * The refusals matter as much as the happy path: a misspelled engine name has to
@@ -77,7 +78,7 @@ describe("e2e engine selection", () => {
     expect(engineList({ npm_lifecycle_event: "ci" })).toBe("chromium");
   });
 
-  it("scopes WebKit to the one spec its build cannot run", () => {
+  it("scopes WebKit to the specs its build cannot run", () => {
     const [project] = projectsFor("webkit");
     // The browser actually launched, not just the project's name: the device
     // descriptor is what sets `defaultBrowserType`.
@@ -85,13 +86,23 @@ describe("e2e engine selection", () => {
     expect(project?.use.defaultBrowserType).toBe("webkit");
     expect(project?.testIgnore).toBeInstanceOf(RegExp);
 
-    // Self-updating on purpose: whatever specs exist, exactly one is excluded,
-    // and it is the WebRTC one. A widened ignore list, or a new spec silently
-    // falling outside the run, fails here rather than on a runner.
-    const specs = readdirSync(specDir).filter((name) => name.endsWith(".spec.ts"));
-    expect(specs.length).toBeGreaterThanOrEqual(5);
+    // Self-updating on purpose: whatever specs exist, the excluded ones are
+    // listed here explicitly, so a widened ignore list fails here rather than on
+    // a runner — and so a new spec cannot silently fall outside the run. Sorted
+    // on both sides because `readdirSync` order is a filesystem detail.
+    const specs = readdirSync(specDir)
+      .filter((name) => name.endsWith(".spec.ts"))
+      .sort();
+    expect(specs.length).toBeGreaterThanOrEqual(6);
     const ignore = project?.testIgnore as RegExp;
-    expect(specs.filter((name) => ignore.test(name))).toEqual(["pairing-transfer.spec.ts"]);
+    const excluded = specs.filter((name) => ignore.test(name));
+    expect(excluded).toEqual([
+      // Cannot navigate with the network emulated down. Service workers work on
+      // this engine; navigating offline does not, which is what DoD 6 needs.
+      "offline.spec.ts",
+      // No RTCPeerConnection on either WebKit build, so it cannot pair.
+      "pairing-transfer.spec.ts",
+    ]);
   });
 
   it("leaves the engines that can pair whole", () => {

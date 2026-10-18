@@ -13,7 +13,7 @@ Codec used per browser pair, plus notes. `DB1` = minimal descriptor (PRD
 | Chromium ↔ Chromium (peer disconnect)                                                             | same pair, host device removed                              | —     | guest reaches `PEER_LOST` with no console errors                 | 2026-10-10 |
 | Chromium ↔ Chromium (OPFS save path)                                                              | guest without File System Access                            | —     | file staged and saved (PRD 8.5 Firefox/Safari sink)              | 2026-10-10 |
 | Firefox ↔ Firefox (two browser contexts)                                                          | the nightly's second engine, same suite                     | DB1   | pass (19/19 on Windows; the nightly runs it on Linux)            | 2026-10-15 |
-| WebKit, whole suite minus the pairing spec                                                        | `npm run test:webkit`, scheduled job                        | —     | 17/17, real absence of WebRTC and real capability rows           | 2026-10-15 |
+| WebKit, whole suite minus the pairing and offline specs                                           | `npm run test:webkit`, scheduled job                        | —     | 22/22, real absence of WebRTC and real capability rows           | 2026-10-18 |
 | Chromium ↔ Firefox (two engines)                                                                  | real WebRTC, DB1 code pasted                                | DB1   | pass (`scripts/interop-matrix.mjs`)                              | 2026-10-10 |
 | Firefox ↔ Chromium (two engines)                                                                  | real WebRTC, DB1 code pasted                                | DB1   | pass (`scripts/interop-matrix.mjs`)                              | 2026-10-10 |
 | Chromium settings sheet (theme, hi, reduce motion, wake lock, STUN, persistence, Devanagari face) | —                                                           | —     | pass (`tests/e2e/settings.spec.ts`)                              | 2026-10-10 |
@@ -66,7 +66,14 @@ and a note, and every one of the 14 requests is same-origin static
 (file://, script, stylesheet, font) with STUN off — nothing leaves the
 device. Both gates pass.
 
-The offline row is DoD 6. With the network cut the app still boots out of the
+The offline row is DoD 6, and it is **Chromium and Firefox only**. Playwright's
+WebKit build cannot navigate with the network emulated down — the service
+worker works there, but every offline reload fails with an internal error — so
+the offline spec is excluded from that project and DoD 6 has no automated
+coverage on the engine closest to Safari. That is why the real-Safari and
+hotspot rows below are load-bearing rather than a formality.
+
+What the row does show: with the network cut the app still boots out of the
 service worker's cache, a deep `?screen=` route still resolves, the settings
 sheet still opens, and — from two separate offline contexts — an offer and a
 reply are still produced and exchanged through the shared-link route with no

@@ -1333,3 +1333,45 @@ before a byte has landed, instead of failing the transfer.
   test stops before the connection, so the comment above it says so plainly. The
   offline _app_ half is fully automated, and it is the half that was actually
   broken.
+
+## 2026-10-18 - Playwright's WebKit cannot navigate offline, so DoD 6 is unverified there
+
+- **Problem:** The DoD 6 offline spec was written and run against Chromium, where
+  it passed. The scheduled WebKit job runs "every spec but pairing", so the new
+  spec was picked up there too - and failed all three of its tests with `WebKit
+encountered an internal error` on `page.reload()` and `page.goto()` while the
+  network was emulated down. The job would have gone red on its first run.
+
+  The failure is narrower than "WebKit has no service workers". Service workers
+  work there: the app installs, `claim()`s, and populates its cache on this
+  engine, so the offline spec's setup completed every time. What this build
+  cannot do is _navigate_ with the network down.
+
+- **Choice:** The offline spec joins the pairing spec in WebKit's project-level
+  `testIgnore`, with both reasons written out in `playwright.config.ts`.
+  `e2e-browsers.test.ts` is updated to name both excluded specs explicitly
+  rather than counting them, so the next exclusion has to be written down.
+
+- **Reason:** The alternative - an in-file `test.skip()` on WebKit - is what this
+  project already rejects for the pairing spec, and for the same reason: a skip
+  hides the fact that the engine collects a smaller suite, and that difference is
+  what keeps the WebKit leg off the gate. Leaving the spec in and letting it fail
+  was the third option and the worst one, because it turns a known harness limit
+  into a red nightly that trains people to ignore red nightlies.
+
+  Project-level exclusion was also the honest reading of the result. The
+  alternative mechanism, blocking requests with `page.route` instead of
+  `setOffline`, was rejected on inspection: Playwright does not route service
+  worker requests, so the worker's network-first `fetch()` would still succeed and
+  the test would quietly become a check that an _online_ page renders - passing
+  while proving nothing about offline.
+
+- **Cost and limits:** This is a real gap, not a formality. DoD 6 is a claim
+  about Safari, and after this change no automated run covers it on the engine
+  that most resembles Safari. It stays a hardware row in `docs/INTEROP.md` with
+  the same phone and real hotspot it needed anyway for DoD 1 and DoD 2, and both
+  docs now say so where a reader of the spec will find it.
+
+- **Verified:** `npm run test:webkit` green at 22 (17 before this work, plus the
+  5 design-gate tests, minus the 3 offline ones), and the Firefox leg green at 28
+  - which is why the exclusion is WebKit's alone rather than a blanket one.

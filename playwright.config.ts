@@ -17,10 +17,27 @@ import { defineConfig, devices } from "@playwright/test";
 const PORT = 4199;
 
 /**
- * The one spec that needs a real `RTCPeerConnection`, excluded for the engine
- * that has none (see the `webkit` entry below).
+ * The specs Playwright's WebKit build cannot run.
+ *
+ * Two, for two different reasons, and both are properties of the harness rather
+ * than of the app:
+ *
+ * 1. `pairing-transfer` needs a real `RTCPeerConnection`. Playwright's WebKit
+ *    build ships without one on Windows, and WebKitGTK's `enable-webrtc` setting
+ *    defaults to false on Linux, so no pairing is possible on either platform.
+ * 2. `offline` navigates while the network is emulated down, and that makes
+ *    WebKit fail the navigation with an internal error rather than serving it.
+ *    Service workers themselves work there - the app installs, claims and caches
+ *    on this engine - so it is specifically navigating offline that the build
+ *    cannot do. DoD 6 is a claim about Safari, so excluding this spec is a real
+ *    gap in coverage and not a formality: it stays a hardware row in
+ *    docs/INTEROP.md, and nothing here pretends otherwise.
+ *
+ * Scoped per project rather than skipped inside a file, because a skip hides the
+ * fact that this engine collects a smaller suite - and that difference is
+ * exactly what keeps the WebKit leg off the gate (see `e2e-browsers.test.ts`).
  */
-const PAIRING_SPEC = /pairing-transfer\.spec\.ts$/;
+const WEBKIT_UNRUNNABLE = /pairing-transfer\.spec\.ts$|offline\.spec\.ts$/;
 
 /**
  * The engines this suite can actually drive.
@@ -34,11 +51,13 @@ const PAIRING_SPEC = /pairing-transfer\.spec\.ts$/;
  * WebKit is included, but scoped rather than driven whole. It genuinely cannot
  * pair — Playwright's WebKit build ships without `RTCPeerConnection` on Windows,
  * and WebKitGTK's `enable-webrtc` setting defaults to false on Linux — so the
- * pairing spec is excluded for it. Everything else runs, and on WebKit it runs
- * against the *real* absence of the API: the unsupported-browser messaging, the
- * connection self-test and the OPFS-detection contract are exercised there with
- * nothing stubbed, which no other engine can do (`tests/e2e/degradation.spec.ts`
- * runs on all three, but only WebKit brings the genuine article).
+ * pairing spec is excluded for it. It also cannot navigate while the network is
+ * emulated down, so the offline spec is excluded for it too. Everything else
+ * runs, and on WebKit it runs against the *real* absence of the API: the
+ * unsupported-browser messaging, the connection self-test and the OPFS-detection
+ * contract are exercised there with nothing stubbed, which no other engine can
+ * do (`tests/e2e/degradation.spec.ts` runs on all three, but only WebKit brings
+ * the genuine article).
  *
  * It is also why WebKit is not a leg of the gate: without the pairing spec it
  * collects a smaller suite, so its counts cannot be the counts `README.md`
@@ -49,7 +68,7 @@ const PAIRING_SPEC = /pairing-transfer\.spec\.ts$/;
 const ENGINES = {
   chromium: { use: devices["Desktop Chrome"] },
   firefox: { use: devices["Desktop Firefox"] },
-  webkit: { use: devices["Desktop Safari"], testIgnore: PAIRING_SPEC },
+  webkit: { use: devices["Desktop Safari"], testIgnore: WEBKIT_UNRUNNABLE },
 } as const;
 
 /**

@@ -165,6 +165,15 @@ unreachable, through the shared-link route, with no console errors — and stops
 there. The data channel stays a row in the manual matrix, needing a phone on the
 other end of a real hotspot.
 
+`offline.spec.ts` is also excluded from WebKit, for a different reason: this
+build's service workers work (the app installs, claims and caches on it), but it
+cannot _navigate_ with the network emulated down — every test fails with an
+internal error on the reload. So DoD 6 has **no** automated coverage on the engine
+that most resembles Safari, which is why its row in the manual matrix is not
+optional. `playwright.config.ts` records both exclusions and why, and
+`e2e-browsers.test.ts` names the excluded specs rather than counting them, so the
+next one has to be written down too.
+
 Every one of those specs is engine-agnostic, which is what lets the nightly run
 the whole suite on Firefox and the WebKit leg run all but pairing on WebKit. The
 one exception is the pairing spec, which needs real WebRTC and is therefore
@@ -224,6 +233,49 @@ throwaway checkout. `npm run docs:figures` forces the write, and
 instead of a 60-second gate run — including the abort paths: an ambiguous
 summary, a figure whose stage printed nothing, a reworded sentence, and a CRLF
 file.
+
+## Impeccable detector (DoD 11)
+
+DoD 11 asks that "the Impeccable detector reports zero findings". It does, on
+the running production build, at both viewports:
+
+```
+npm run build && npm run preview -- --port 4199 --strictPort
+npx impeccable detect http://localhost:4199                      # desktop
+npx impeccable detect --viewport 390x844 http://localhost:4199   # mobile
+```
+
+Both return exit 0 with no findings (2026-10-18, impeccable 4.6.0).
+
+**A zero from that scanner is worth nothing until you have seen it fail.** "No
+findings" and "not looking at anything" print the same thing, so the run above
+was validated by planting a violation — `#f2f2f2` text on `#f0f0f0` — in the
+primary button and confirming the scan reports it and exits 2. It does:
+
+```
+low-contrast  1.0:1 (need 4.5:1) — text #f2f2f2 on #f0f0f0
+              div.home-actions > button.btn.btn-primary
+```
+
+Two things this taught, both worth keeping:
+
+- **The scan really does read the rendered SPA.** It is worth doubting — a
+  scanner pointed at a client-rendered app can easily snapshot an empty
+  `#app` and report a clean bill of health for having measured nothing. Planting
+  the violation is what distinguishes those, and here it renders fine.
+- **Plant the violation where the cascade lets it win.** The first attempt was
+  injected at the top of the `.btn-primary` rule and silently did nothing,
+  because `background: var(--accent)` sits a line or two further down the same
+  rule. Two clean scans followed, and the wrong conclusion drawn from them was
+  that the scanner could not see the app at all. If a planted violation reports
+  nothing, suspect the probe before you trust the tool.
+
+The detector has no rule for gradients or nested cards — those are product rules
+(PRD 10.2), not scanner rules, and they are gated by `design-gates.test.ts` and
+`tests/e2e/design-gates.spec.ts` instead. This gate is deliberately a documented
+command rather than a ninth gate stage: the scanner is an unpinned `npx` package
+that launches its own browser, which is a poor thing to make every pull request
+depend on.
 
 ## On CI
 
