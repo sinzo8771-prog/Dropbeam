@@ -1441,3 +1441,38 @@ encountered an internal error` on `page.reload()` and `page.goto()` while the
   is what surfaced the second and third changes. `i18n.test.ts` pins that the
   message names the hotspot remedy PRD 553 promises, and `ui.test.tsx` pins the
   projection. Full gate green.
+
+## 2026-10-18 - §19 work landed under M8 labels, and why that was legitimate
+
+- **Problem:** PRD §17 builds milestone by milestone, and §19 is headed "Roadmap
+  (post v1, do not build now)" - it lists "Auto-reconnect and resumable
+  transfers (chunk bitmap, hash tree)". Six commits implemented §19 items while
+  M8's own remaining task, the manual device matrix, was still open:
+
+  `52b6c47` resumable transfers, `8a6fa15` recoverable-drop grace, `764cd78`
+  per-chunk repair, `3532918`/`2ce26c5`/`bf52138` its tests and shared path.
+
+  Read on its own that is §17 ordering broken: two milestones' worth of work
+  landing before the earlier milestone was done.
+
+- **Choice:** Keep the work, record the ordering, and stop labelling new §19
+  work as `M8:`.
+
+- **Reason:** `v1.0` was already tagged, at `3439704`, before any of those six
+  commits. §19 is gated on _after_ v1.0, not on the matrix being finished, so
+  every one of them was legitimate post-v1 work. The mistake was not the work
+  and not the timing - it was the commit prefix, which files post-v1 work under
+  the milestone that owns the unfinished matrix. That matters more than it
+  sounds: `git log` is how a reader reconstructs what happened, and a reader
+  seeing six `M8:` commits would conclude M8 had advanced when in fact the
+  matrix had not moved at all.
+
+  The distinction also decides what "M8 complete" means. It is still gated on
+  the hardware rows in `docs/INTEROP.md`, not on anything in a commit message.
+
+- **Cost and limits:** Nothing to undo, and the six commits stay as they are -
+  rewriting published history to relabel them would cost more than it is worth.
+  From here, §19 work takes its own prefix so the two are never confused again.
+
+- **Verified:** nothing to run; this records why the log reads the way it does.
+  `docs/INTEROP.md` remains the authority on what is still open.
