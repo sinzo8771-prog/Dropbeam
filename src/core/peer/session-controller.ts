@@ -110,7 +110,15 @@ export class SessionController {
       codeExpiresAt: this.codeExpiresAt,
       peerName: this.peerName,
       channel: this.channel,
-      error: this.error,
+      // The machine can fail on its own — every timeout it arms goes straight
+      // to `FAILED` — and those are the failures a user is most likely to meet,
+      // because a peer that never arrives is what a client-isolated network and
+      // a dead hotspot both look like. Reporting only the ones this class
+      // failed itself would render a bare failed screen: the state would say so
+      // while the reason the UI shows the user stayed empty. The machine's own
+      // failure is cleared on `reset()`, and `clear()` clears this one, so the
+      // fallback cannot outlive an attempt.
+      error: this.error ?? this.machine.error,
     };
   }
 

@@ -1375,3 +1375,69 @@ encountered an internal error` on `page.reload()` and `page.goto()` while the
 - **Verified:** `npm run test:webkit` green at 22 (17 before this work, plus the
   5 design-gate tests, minus the 3 offline ones), and the Firefox leg green at 28
   - which is why the exclusion is WebKit's alone rather than a blanket one.
+
+## 2026-10-18 - the guest had no timeout at all, which is why the isolation row said "expect"
+
+- **Problem:** The manual matrix row for "guest Wi-Fi with client isolation" had
+  been sitting there reading "expect helpful failure" since it was written. It
+  was an expectation, not a result, and checking it turned up a real bug on the
+  one network in the matrix where failure is the correct outcome.
+
+  On a client-isolated network the codes cross fine - they are typed, scanned or
+  pasted, not routed - so both devices complete the handshake and then stop,
+  because the peer connection can never be established. The host handles that:
+  `PeerSession.applyAnswer` awaits `waitForChannel`, which gives up after
+  `CONNECT_TIMEOUT_MS` and fails with `CONNECT_TIMEOUT`. The guest had no
+  equivalent. `joinWithCode` publishes the answer and returns, the guest's state
+  only moves when the channel opens, and it passes through `CONNECTING` at that
+  same instant - so the connecting timeout never armed for it. `TIMEOUT_STATE`
+  listed `GATHERING`, `CONNECTING` and `WAITING_FOR_REPLY`, and not
+  `SHOWING_ANSWER`. The guest waited on a channel that would never arrive, with
+  no bound at all.
+
+  Worse, the failure would have been silent even once bounded. The machine's
+  timeout goes straight to `FAILED`, but `SessionController.error` was only ever
+  set by the controller's own `fail()`, so a machine-initiated failure left the
+  snapshot's reason null; and the UI subscribed to the machine for `state` alone,
+  while its alert is gated on `error`. So the guest would have moved to a FAILED
+  screen that said nothing and offered no Try again, while the host explained
+  itself. One side of a pair telling the user what went wrong while the other
+  says nothing is the worst version of this failure.
+
+- **Choice:** Three changes, smallest first.
+  1. `SHOWING_ANSWER` arms the `connecting` timeout, so the guest gets the same
+     20 s bound and the same `CONNECT_TIMEOUT` code as the host.
+  2. `SessionController.snapshot()` falls back to the machine's own failure, so
+     a failure the machine reached by itself carries its reason.
+  3. The machine subscription in `App.tsx` projects that reason onto the alert,
+     via an exported `errorFromMachine` so the rule is testable on its own.
+
+- **Reason:** Symmetry is the point. The two sides reach the same dead end by
+  different routes - the host has a seam to time out in, the guest has an event
+  that simply never fires - and the fix has to land on both, or the matrix row
+  still describes two devices behaving differently. Bounding the wait and
+  carrying the reason are separate changes because either alone still leaves a
+  silent failure.
+
+- **Cost and limits:** The bound is the same 20 s PRD 7.1 already promises for
+  connecting, which is generous for a channel that normally opens in well under a
+  second, so the risk is a slow-but-failing connection being cut off rather than
+  a real connection being harmed. `snapshot()` falling back to the machine's
+  failure also changes what a _host_ sees on its own gathering or code-expiry
+  timeouts, which previously reported a FAILED screen with no reason; that is the
+  same defect and is now reported the same way as everything else.
+
+  What is still not covered is the one thing only hardware can show: that a real
+  router with client isolation produces this shape rather than some other
+  failure. The tests prove the app responds correctly once the transport never
+  delivers a channel, not that the router behaves this way.
+
+- **Verified:** 4 new tests. `session-pairing.test.ts` drives both sides of the
+  scenario - the host through a transport whose `applyAnswer` rejects exactly as
+  `waitForChannel` does, the guest by simply never receiving the channel event -
+  and asserts each ends `FAILED` with `CONNECT_TIMEOUT` within the bound. The
+  guest test was written first and failed against the shipped code, still in
+  `SHOWING_ANSWER` after 21 s; the state alone passing and the reason still null
+  is what surfaced the second and third changes. `i18n.test.ts` pins that the
+  message names the hotspot remedy PRD 553 promises, and `ui.test.tsx` pins the
+  projection. Full gate green.

@@ -169,14 +169,29 @@ regression through the real UI.
 
 ## Manual (fill during M8)
 
-| Pair                             | Network                           | Route     | Codec | Result                 | Notes                                                 |
-| -------------------------------- | --------------------------------- | --------- | ----- | ---------------------- | ----------------------------------------------------- |
-| Windows Chrome ↔ Android Chrome  | same Wi-Fi                        | QR        |       |                        |                                                       |
-| Windows Chrome ↔ iPhone Safari   | same Wi-Fi                        | QR + link |       |                        |                                                       |
-| Chrome ↔ Firefox                 | same Wi-Fi                        | paste     | DB1   | **engine row done**    | loopback pair pass above; still run over real Wi-Fi   |
-| Chrome ↔ Safari (macOS)          | same Wi-Fi                        | paste     |       |                        | no WebRTC in the Windows WebKit build; needs hardware |
-| Android Chrome ↔ Android Samsung | same hotspot                      | QR        |       |                        |                                                       |
-| Any ↔ any                        | guest Wi-Fi with client isolation | —         |       | expect helpful failure |                                                       |
+Every row below needs two physical devices on a real network, so none of it can
+be done from a desk. Each row says what to do and what to write down, so filling
+them in is mechanical rather than a judgement call.
+
+**For every row**, open the debug panel first (eight taps inside the right edge,
+within 700 ms of each other — FR-50) and note the WebRTC, OPFS and Save sink
+rows. Those are the capabilities the run is actually exercising, and a failure
+with `OPFS yes / OPFS write fails` in the log is a browser bug rather than
+anything this app can fix.
+
+| Pair                             | Network                           | Route     | Codec | Result                | Notes                                                                                                                                                                                                                                        |
+| -------------------------------- | --------------------------------- | --------- | ----- | --------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Windows Chrome ↔ Android Chrome  | same Wi-Fi                        | QR        |       |                       | DoD 1: 500 MB video, QR only, matching words                                                                                                                                                                                                 |
+| Windows Chrome ↔ iPhone Safari   | same Wi-Fi                        | QR + link |       |                       | DoD 2: 50 MB, then a file past the memory limit                                                                                                                                                                                              |
+| Chrome ↔ Firefox                 | same Wi-Fi                        | paste     | DB1   | **engine row done**   | loopback pair pass above; still run over real Wi-Fi                                                                                                                                                                                          |
+| Chrome ↔ Safari (macOS)          | same Wi-Fi                        | paste     |       |                       | no WebRTC in the Windows WebKit build; needs hardware                                                                                                                                                                                        |
+| Android Chrome ↔ Android Samsung | same hotspot                      | QR        |       |                       | no internet on the hotspot if you can arrange it                                                                                                                                                                                             |
+| Any ↔ any                        | guest Wi-Fi with client isolation | —         |       | **app half verified** | handshake completes, then both sides fail in 20 s with `CONNECT_TIMEOUT` and the hotspot remedy (`tests/integration/session-pairing.test.ts`, PRD 553). Still needs a real isolated guest network to confirm the router produces this shape. |
+
+Write the date, both browser versions, and what happened — including the reason
+code if one is shown, since those are the ones worth chasing back into the tests.
+A row that failed for a reason this app cannot fix (an OPFS write that throws,
+a build with no `RTCPeerConnection`) is still a result; record it as one.
 
 ## Known limits
 

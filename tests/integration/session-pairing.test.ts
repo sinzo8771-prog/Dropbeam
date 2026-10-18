@@ -8,6 +8,7 @@ import { buildSdp } from "../../src/core/handshake/sdp-template";
 import { HANDSHAKE_TTL_SECONDS, type Handshake } from "../../src/core/handshake/codec-db1";
 import { toBase64Url } from "../../src/core/handshake/encoding";
 import { MemoryChannel } from "../helpers/memory-channel";
+import { DropbeamError } from "../../src/core/errors";
 import type { ChannelLike } from "../../src/core/transfer/channel";
 
 /**
@@ -210,5 +211,102 @@ describe("session pairing, host ↔ guest (PRD 5.1, 13.3)", () => {
     expect(seen).toContain("GATHERING");
     expect(seen).toContain("SHOWING_OFFER");
     expect(seen[seen.length - 1]).toBe("WAITING_FOR_REPLY");
+  });
+});
+
+/**
+ * Guest Wi-Fi with AP isolation (PRD 13.4 matrix row, PRD 12 CONNECT_TIMEOUT).
+ *
+ * The codes cross fine — they are typed, scanned or pasted, not routed — so a
+ * client-isolated network gets all the way through the handshake and then
+ * stops, because the peer connection itself can never be established. That is
+ * the one network in the matrix where the expected result is a *failure*, and
+ * PRD 12 makes it a specific promise: detect the timeout, explain it, suggest
+ * the hotspot. Both halves of that promise are checked here, per side, because
+ * the two sides reach the dead end differently and the guest is the one that
+ * can silently not reach it at all.
+ *
+ * The host is faithful to the real transport: `applyAnswer` is the seam where
+ * `PeerSession` awaits `waitForChannel`, so a transport that rejects there is
+ * exactly what a browser does when ICE never completes. The guest gets no such
+ * seam — its channel arrives as a transport event, so isolation means an event
+ * that simply never fires, which is the part worth pinning.
+ */
+describe("a peer that cannot be reached (PRD 12, matrix row: guest Wi-Fi)", () => {
+  /** The real host transport's `applyAnswer` timing out, as `waitForChannel` does. */
+  function isolatingTransport(role: "host" | "guest"): PeerTransport {
+    const base = fakeTransport(role);
+    return {
+      ...base,
+      async applyAnswer() {
+        throw new DropbeamError("CONNECT_TIMEOUT", "no data channel within the timeout");
+      },
+      close() {
+        base.close();
+      },
+    };
+  }
+
+  it("fails the host with CONNECT_TIMEOUT rather than hanging", async () => {
+    vi.useFakeTimers();
+    try {
+      const host = new SessionController({
+        side: "host",
+        baseUrl: BASE,
+        transport: isolatingTransport("host"),
+        nowSeconds: () => NOW,
+        machine: { timeouts: { gathering: 60_000, connecting: 20_000, waitingForReply: 600_000 } },
+      });
+      const guest = makeController("guest");
+
+      const offer = await host.startHosting();
+      const answer = await guest.controller.joinWithCode(offer.code);
+
+      const settled = await host.applyReplyCode(answer.code);
+      expect(settled.state).toBe("FAILED");
+      expect(settled.error).toBe("CONNECT_TIMEOUT");
+      // Nothing half-open: no code to show, and no channel left behind.
+      expect(settled.channel).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("fails the guest too, rather than waiting on a channel that never arrives", async () => {
+    /*
+     * The regression this pins. The guest publishes its answer and returns; its
+     * state only moves when the channel opens, and it only passes through
+     * CONNECTING at that same moment — so the connecting timeout never arms for
+     * it. With no arm, there was no bound at all: on an isolated network the
+     * host would fail at 20 s with an explanation while the guest sat on its
+     * waiting screen indefinitely, with no message and no Try again. One side
+     * telling the user what went wrong while the other says nothing is the worst
+     * version of this failure, and it is exactly the pair of devices the matrix
+     * row is written for.
+     */
+    vi.useFakeTimers();
+    try {
+      const host = makeController("host");
+      const guest = makeController("guest", {
+        machine: { timeouts: { gathering: 60_000, connecting: 20_000, waitingForReply: 600_000 } },
+      });
+
+      const offer = await host.controller.startHosting();
+      const answer = await guest.controller.joinWithCode(offer.code);
+      expect(answer.state).toBe("SHOWING_ANSWER");
+
+      // The host's side is driven normally; nothing ever opens the guest's
+      // channel, because on an isolated network ICE never delivers it.
+      await host.controller.applyReplyCode(answer.code);
+
+      // Well past the bound PRD 12 promises, with no channel event.
+      await vi.advanceTimersByTimeAsync(21_000);
+
+      const snap = guest.controller.snapshot();
+      expect(snap.state).toBe("FAILED");
+      expect(snap.error).toBe("CONNECT_TIMEOUT");
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

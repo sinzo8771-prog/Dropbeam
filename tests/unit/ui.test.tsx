@@ -8,7 +8,7 @@ import { ProgressRow, formatBytes } from "../../src/ui/components/ProgressRow";
 import { Prompt } from "../../src/ui/components/Prompt";
 import { Beam } from "../../src/ui/components/Beam";
 import { VerifyCard } from "../../src/ui/components/VerifyCard";
-import { App } from "../../src/ui/App";
+import { App, errorFromMachine } from "../../src/ui/App";
 import { SettingsStore, type KeyValueStore } from "../../src/core/platform/storage";
 import { SessionController, type PeerTransport } from "../../src/core/peer/session-controller";
 import { buildSdp } from "../../src/core/handshake/sdp-template";
@@ -258,6 +258,39 @@ describe("VerifyCard (PRD 9.3)", () => {
 });
 
 describe("App (PRD 10.1 screens)", () => {
+  it("projects a machine-initiated failure onto the alert (PRD 12)", () => {
+    /*
+     * The alert is gated on `error`, and every failure that arrives through the
+     * session already sets it — but the state machine can also fail on its own,
+     * because it arms the timeouts. Before this projection, such a failure moved
+     * the screen to FAILED and left `error` empty, so the user got a dead screen
+     * with no message and no Try again. It is the shape of the client-isolation
+     * bug: the guest was bounded and still said nothing.
+     *
+     * Tested on its own because jsdom has no `RTCPeerConnection`, so driving a
+     * real timeout through a rendered App would mean standing up a fake WebRTC
+     * stack to exercise three lines. The alert's own rendering is covered by the
+     * UNSUPPORTED and PEER_DECLINED cases below.
+     */
+    expect(errorFromMachine("FAILED", "CONNECT_TIMEOUT")).toBe("CONNECT_TIMEOUT");
+    expect(errorFromMachine("FAILED", "CODE_EXPIRED")).toBe("CODE_EXPIRED");
+    // A FAILED with no reason of its own still shows nothing rather than an
+    // empty message — the session reports its own failures separately.
+    expect(errorFromMachine("FAILED", null)).toBeNull();
+    // And no other screen may set it, or a mid-transfer state would light up
+    // the alert.
+    for (const state of [
+      "IDLE",
+      "GATHERING",
+      "SHOWING_ANSWER",
+      "CONNECTING",
+      "CONNECTED",
+      "DISCONNECTED",
+    ] as const) {
+      expect(errorFromMachine(state, "CONNECT_TIMEOUT")).toBeNull();
+    }
+  });
+
   it("shows the home screen with Start and Join", () => {
     render(<App settings={freshSettings()} baseUrl="https://dropbeam.example" />);
     expect(screen.getByText("Start")).toBeTruthy();

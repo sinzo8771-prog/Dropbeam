@@ -34,6 +34,29 @@ describe("i18n catalogs (PRD FR-41, §12, DoD 12)", () => {
     }
   });
 
+  it("tells an unreachable peer what to do about it (PRD 553, FR-61)", () => {
+    /*
+     * The client-isolation row of the manual matrix is the one network where the
+     * expected result is a failure, and PRD 553 promises three things for it:
+     * detect the timeout, explain it, and suggest the hotspot. A code with a
+     * message exists, but "exists" is not the claim — the message has to carry
+     * the remedy, or the user is told they failed and left to guess. This is
+     * what the guest shows after the isolation fix, so it is the last thing
+     * between that bug and a user who can act.
+     */
+    const text = messageForError("CONNECT_TIMEOUT", "en");
+    expect(text.toLowerCase()).toContain("hotspot");
+    // And it has to be about connection, not about a code or a device.
+    expect(text.toLowerCase()).toContain("connect");
+
+    // The troubleshooting page is the other half of the promise (FR-61): the
+    // alert suggests a hotspot, and the page behind it explains AP isolation.
+    expect((en as Record<string, string>)["ts.isolation.body"]!.toLowerCase()).toContain(
+      "isolation",
+    );
+    expect((en as Record<string, string>)["ts.isolation.body"]!.toLowerCase()).toContain("hotspot");
+  });
+
   it("uses identical placeholders in both languages", () => {
     const placeholders = (text: string) => [...text.matchAll(/\{(\w+)\}/g)].map((m) => m[1]).sort();
     for (const key of enKeys) {

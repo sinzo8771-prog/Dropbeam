@@ -106,6 +106,21 @@ export function CodeExpiry({
   );
 }
 
+/**
+ * The reason code to show for a machine transition, or null to show none.
+ *
+ * Exported so the rule is testable on its own. It is small enough to look
+ * obvious, which is exactly why it was worth getting wrong: it only ever fires
+ * for a failure the state machine reached by itself, because every other
+ * failure already goes through the session, which reports its own reason.
+ */
+export function errorFromMachine(
+  state: ConnectionState,
+  error: ErrorCode | null,
+): ErrorCode | null {
+  return state === "FAILED" ? error : null;
+}
+
 export function App({ settings, baseUrl }: AppProps = {}) {
   const store = useMemo(() => settings ?? new SettingsStore(), [settings]);
   const [pref, setPref] = useState(store.current);
@@ -259,7 +274,20 @@ export function App({ settings, baseUrl }: AppProps = {}) {
   );
   useEffect(() => {
     setScreen(machine.state);
-    return machine.subscribe((snap) => setScreen(snap.state));
+    return machine.subscribe((snap) => {
+      setScreen(snap.state);
+      /*
+       * A failure the machine reaches on its own — every timeout it arms —
+       * carries its own reason, and projecting only the state would change the
+       * screen to FAILED while leaving the alert's condition (`error`) empty.
+       * The user would get a dead screen with no explanation and no Try again,
+       * which is the one outcome worse than waiting: it looks like the app
+       * broke. The reason codes are the same ones the session reports, so the
+       * user sees one message per cause rather than a generic one.
+       */
+      const reason = errorFromMachine(snap.state, snap.error);
+      if (reason) setError(reason);
+    });
   }, [machine]);
 
   /**

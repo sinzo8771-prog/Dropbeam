@@ -87,9 +87,23 @@ export type MachineSnapshot = {
 
 type Listener = (snapshot: MachineSnapshot) => void;
 
+/**
+ * Which state arms which timeout (PRD 7.1, PRD 12).
+ *
+ * `SHOWING_ANSWER` is here for the same reason `CONNECTING` is, and it is easy
+ * to miss because the answerer looks like it has somewhere to go. A guest
+ * publishes its answer and returns; its state only moves when the data channel
+ * opens, and it only passes through `CONNECTING` at that same instant — so
+ * without an arm here, nothing ever bounded it. On a client-isolated network
+ * the host would fail at its 20 s timeout with an explanation while the guest
+ * sat on the waiting screen for ever, with no message and no Try again. Same
+ * bound, same reason code, both sides: a failure the user can act on is worth
+ * more than a spinner that admits nothing.
+ */
 const TIMEOUT_STATE: Partial<Record<ConnectionState, keyof ConnectionTimeouts>> = {
   GATHERING: "gathering",
   CONNECTING: "connecting",
+  SHOWING_ANSWER: "connecting",
   WAITING_FOR_REPLY: "waitingForReply",
 };
 
