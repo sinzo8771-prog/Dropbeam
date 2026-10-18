@@ -19,11 +19,46 @@ const CACHE = "dropbeam-" + "__BUILD_ID__";
 const SHARE_CACHE = "dropbeam-share";
 /** Sentinel staging index entry for a shared text/URL ("clipboard sync"). */
 const TEXT_ENTRY = "text";
-/** The app shell. Hashed assets (JS/CSS) are cached on first visit. */
-const SHELL = ["./"];
+/**
+ * Everything that must be in the cache before the app can be called offline.
+ *
+ * The shell alone is not enough, and that is not a theoretical worry: the app
+ * code-splits, and the settings sheet, the repair paths and the hashing worker
+ * are separate chunks that are only requested the first time a user reaches
+ * them. Precaching the shell and the entry script therefore still leaves a
+ * device that has never opened Settings unable to open Settings offline — the
+ * dynamic import fails and the user gets a dead button with no network to
+ * explain it. DoD 6 says the app works offline after first load, so every
+ * emitted asset belongs here.
+ *
+ * `scripts/postbuild.mjs` rewrites this line after every build with the full
+ * hashed list, because those names do not exist until Vite has hashed them.
+ */
+const SHELL = ["./", "__PRECACHE__"];
+
+/**
+ * Put every asset in the cache, resiliently.
+ *
+ * `addAll` rejects as a unit, so one missing file would fail the whole install
+ * and leave the app with no offline copy at all — trading a broken deep link
+ * for a broken app. The shell goes in first and alone, because it is what a
+ * navigation falls back to; everything after it is best-effort, and a miss is
+ * reported rather than swallowed.
+ */
+async function precache() {
+  const cache = await caches.open(CACHE);
+  await cache.addAll(["./"]);
+  await Promise.all(
+    SHELL.filter((url) => url !== "./").map((url) =>
+      cache.add(url).catch((error) => {
+        console.warn("dropbeam: precache missed", url, error);
+      }),
+    ),
+  );
+}
 
 self.addEventListener("install", (event) => {
-  event.waitUntil(caches.open(CACHE).then((cache) => cache.addAll(SHELL)));
+  event.waitUntil(precache());
   // Take over immediately: the update flow below is what tells an
   // already-open page to reload, so waiting would only delay it.
   self.skipWaiting();
@@ -82,6 +117,26 @@ async function stageSharedFiles(request, pageUrl) {
   return Response.redirect(new URL("./#shared", pageUrl).href, 303);
 }
 
+/**
+ * Look this URL up in the precache, ignoring `Vary`.
+ *
+ * `Vary` is about representation negotiation for a server to vary *its* answer
+ * on request headers — `Accept-Encoding`, `Origin`. It is not a statement about
+ * whether two requests want the same file. A static asset on a same-origin path
+ * is one file whatever headers the browser happened to attach, and several
+ * common static servers and dev servers (`vite preview` sends `Vary: Origin`)
+ * set the header anyway.
+ *
+ * Matching it strictly is what makes offline quietly fall apart: the precache is
+ * written by this worker, whose own `cache.add` requests carry no `Origin`,
+ * while a module script fetched by `import()` does, so the very chunks DoD 6
+ * exists to serve fail to match the copy this worker stored — a 200 that becomes
+ * a `net::ERR_FAILED` on a dead button, with nothing in the logs to explain it.
+ */
+function lookup(request) {
+  return caches.match(request, { ignoreVary: true });
+}
+
 self.addEventListener("fetch", (event) => {
   const { request } = event;
   const url = new URL(request.url);
@@ -101,14 +156,14 @@ self.addEventListener("fetch", (event) => {
           caches.open(CACHE).then((cache) => cache.put("./", copy));
           return response;
         })
-        .catch(() => caches.match("./")),
+        .catch(() => lookup("./")),
     );
     return;
   }
 
   // Cache-first for everything else (script, style, font, icon…).
   event.respondWith(
-    caches.match(request).then((cached) => {
+    lookup(request).then((cached) => {
       if (cached) return cached;
       return fetch(request).then((response) => {
         if (!response || response.status !== 200) return response;

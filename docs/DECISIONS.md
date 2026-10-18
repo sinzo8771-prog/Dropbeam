@@ -763,3 +763,573 @@ filenames.
   initial, which is why the gate reports more headroom than before. This
   is a measurement fix, not extra licence: the entry module is still
   counted whole, and it still grew 4.1 KB gz for per-chunk repair.
+
+## 2026-10-13 - The release audit is a gate, not a printout
+
+`npm run ci` now ends with the release audit, and the audit decides with an
+exit code (DoD 5, DoD 8).
+
+- **Problem:** `scripts/audit-release.mjs` computed both DoD verdicts and
+  then threw them away. Lighthouse's scores were only `console.log`'d, and the
+  network audit ended in a ternary that printed `PASS` or `FAIL` with no
+  `process.exitCode`. A run in which every request left the origin still
+  exited 0, so nothing automated could notice a regression in the two
+  requirements the file exists to check. It also required a human to start
+  `vite preview` on :4198 first - exactly the kind of setup step that quietly
+  stops happening.
+
+- **Choice:** the thresholds are numbers in one place (`CATEGORY_GATES`,
+  `OFF_ORIGIN_GATE`), every verdict goes through a single `check()` that
+  records failures, and the script sets `process.exitCode = 1` when that list
+  is non-empty. It now starts its own `vite preview` server programmatically
+  (`preview()` from Vite) and closes it in a `finally`, so the command is
+  self-contained and the port is released even when a gate fails.
+  `npm run ci` gained a final `npm run audit:release`, and
+  `.github/workflows/ci.yml` gained the same step after the Playwright browser
+  install.
+
+- **Reason:** DoD 5 and DoD 8 are release blockers, and a blocker that exists
+  only as a line of console output is not a blocker. Putting the thresholds in
+  one object also means the gate can be read in one place instead of inferred
+  from the log.
+
+- **Gates chosen:** performance >= 90 and accessibility >= 95 - DoD 8
+  verbatim - plus zero off-origin requests. Best practices and SEO are printed
+  but deliberately not gated: neither is a DoD threshold, and gating them would
+  turn an unrelated Lighthouse scoring change into a red build. For the same
+  reason the `agentic-browsing` category (50) and the sub-0.9 insight audits
+  are labelled informational.
+
+- **Bound to IPv4 on purpose:** the preview server is pinned to `127.0.0.1`.
+  A bare `localhost` follows whatever the host resolves first - the IPv6
+  loopback on some Windows machines, which is the trap `playwright.config.ts`
+  already documents for :4199 - and a Node `fetch` to `localhost` can resolve
+  to IPv4 and get ECONNREFUSED against a server that is in fact up.
+
+- **Cost:** the stage adds ~12 s to `npm run ci` on a warm machine (measured;
+  Lighthouse is run with `throttlingMethod: "simulate"`, so it models slow
+  hardware instead of waiting on it). The gate also needs a Chromium that
+  Lighthouse can drive, so a local `npm run ci` needs
+  `npx playwright install chromium` if the e2e stage has not run in that
+  checkout yet.
+
+- **Verified:** with the real gates the stage exits 0 (Lighthouse 99 / 100 /
+  100 / 100, 14 requests, 0 off-origin). With `performance` temporarily raised
+  to 101 and the off-origin gate set to -1, both branches recorded a failure
+  and the process exited 1; the file was then restored byte-identical.
+
+## 2026-10-13 - CI runs the gate, not a copy of it
+
+`.github/workflows/ci.yml` no longer spells the gate out stage by stage; it
+runs `npm run ci`.
+
+- **Problem:** the workflow listed the stages itself - lint, typecheck, test,
+  build, size, install Chromium, e2e. That list had already fallen behind: it
+  had never run `pwa:health`, so CI could be green on a gate that fails
+  locally, and nothing could notice, because the list lived in two places. The
+  release audit was about to become the second divergence.
+
+- **Choice:** one `run: npm run ci` step, with
+  `npx playwright install --with-deps chromium` kept as a named prerequisite
+  ahead of it, since the e2e specs and the release audit both need a real
+  browser. The order of the stages now comes from `package.json` alone.
+
+- **Reason:** drift between "what CI checks" and "what the gate checks" is
+  silent by construction, and its failure mode is a green build that does not
+  reproduce locally. A single command makes that impossible rather than merely
+  unlikely.
+
+- **Cost:** the Actions UI shows one step instead of eight, so a failure names
+  the stage in the log rather than in the step title - the same granularity a
+  local `npm run ci` gives, which is the point.
+
+- **Enforced, not just agreed:** `tests/unit/ci-parity.test.ts` now fails if
+  the workflow ever lists a stage itself, and it reads the workflow with a line
+  regex rather than a YAML library (the project ships no YAML dependency). That
+  reader cannot see a `run: |` block scalar, so the suite rejects that form
+  outright instead of risking a vacuous pass. The guard was exercised in both
+  directions: re-adding `- run: npm run pwa:health` failed it by naming that
+  exact stage, and a `run: |` rewrite failed it too.
+
+- **Verified:** the workflow parses with a real YAML loader and invokes the gate
+  while duplicating none of its stages; `npm run ci` is green with the parity
+  suite included. GitHub Actions cannot be executed locally, so the job has not
+  actually run on a runner; that remains the one unproven link.
+
+## 2026-10-13 - The README's gate figures are generated, not typed
+
+`npm run docs:figures` re-runs the gate and rewrites the test counts and the
+gzip figure in `README.md`; `npm run docs:figures:check` fails if they are
+stale.
+
+- **Problem:** the same three numbers were hand-maintained in two paragraphs,
+  and they went stale three times in one day - twice before this session, then
+  again the moment five tests were added. Each copy is a claim nobody
+  re-measured, and the two paragraphs had even drifted from each other (265
+  unit/integration in one, 266 in the other).
+
+- **Choice:** `scripts/update-gate-figures.mjs` runs `npm run ci` itself rather
+  than any list of stages, so there is still exactly one definition of the gate,
+  and rewrites each site where a figure appears. Every replacement is a strict
+  single-match pattern over the text (never anchored to a line break, so a
+  Prettier re-wrap cannot break it) and the run aborts when a pattern misses - a
+  silent no-op would quietly restore the hand-maintained problem. Edits change
+  digits only, and a rewrite that would alter the file's line endings is
+  refused.
+
+- **Reason:** those numbers are measurements, so a machine should take them.
+  The one thing that must not be automated is guessing them, which is why the
+  abort paths matter more than the write path.
+
+- **Cost and limits:** it runs the whole gate, so it costs about what `npm run
+ci` costs, release audit included. It reads the figures out of the gate's
+  console summary, which is the fragile part: Vitest emits ANSI escapes even
+  into a pipe, so the codes are stripped, and any change to the summary shape of
+  either tool fails the run loudly instead of writing a wrong number.
+  `docs:figures:check` is deliberately not in `npm run ci`, which would run the
+  entire gate a second time to re-derive numbers it had just produced.
+
+- **Verified:** with all three numbers deliberately corrupted, `--check` exited
+  1 and named the true figures; the generator then restored the file
+  byte-identically (`cmp` clean, zero CR bytes against a pre-corruption copy)
+  and `prettier --check .` stayed green.
+
+## 2026-10-13 - The gate takes its own figures
+
+The entry above left the figures to a separate script, which could only keep
+`README.md` current by running the whole gate a second time. The gate itself now
+takes them, in the run that measures them.
+
+- **Problem:** measurement and publication were two runs of the same thing. The
+  gate measured the counts and printed them; `docs:figures` then ran the entire
+  gate again to re-derive them from its own console output. Between the two,
+  nothing kept the document honest - the check was a command somebody had to
+  remember, it was deliberately not in `npm run ci`, and a stale `README.md`
+  could be committed with every gate green.
+
+- **Choice:** `npm run ci` is now `scripts/gate.mjs`. It runs each stage of
+  `package.json`'s new `gate` list in order, streams each stage's output, and
+  then rewrites the test counts and the gzip figure in `README.md` from that same
+  run. Under CI it checks instead of writing. `scripts/gate-figures.mjs` holds
+  the reading and the rewriting as pure functions, so the abort paths can be
+  tested without a gate run.
+
+- **Reason:** a figure is a measurement, and the only way to publish the number
+  the run actually produced is to be the run. The stage list stays data in
+  `package.json` rather than an array inside the runner because
+  `tests/unit/ci-parity.test.ts` then reads exactly the list the runner reads -
+  without importing an executable module - and can check that every stage is a
+  real script, that none of them runs the gate again, and that the workflow still
+  does not spell the stages out itself.
+
+- **Cost:** the stages are now spawned one process at a time instead of being
+  chained by the shell, so the runner owns the sequencing; it stops at the first
+  red stage and writes nothing, so a broken tree cannot have its figures
+  recorded. A stale `README.md` now fails CI, which is the point, but it is a new
+  way for the build to be red, and the figures are checked against what the Linux
+  runner measures when it eventually runs. Prose that quotes these numbers
+  elsewhere in the documentation is still prose.
+
+- **Verified:** the gate's own run rewrote `README.md` in place; with the numbers
+  deliberately corrupted, a check-mode run exited 1 naming the true figures while
+  a default run restored the file byte-identically (`cmp` clean, line endings
+  unchanged, `prettier --check .` green). The new unit suite drives both halves
+  directly and caught a real defect while being written: the wrapped sentence's
+  separator was read from the replacer's first argument - the whole match - rather
+  than from the capture group, so it wrote the old number where the line break
+  belonged. The fixed-point check in the rewrite is what noticed.
+
+## 2026-10-14 - The gate runs nightly
+
+`.github/workflows/ci.yml` gains a `schedule` trigger: the same job, the same one
+command, at 03:17 UTC.
+
+- **Problem:** the gate only ever ran when something in this repository changed.
+  The environment it runs in - the Ubuntu runner image, the Chromium build
+  Playwright installs, what npm resolves - changes without any commit here, and a
+  push or a PR trigger cannot see that by construction. And the workflow has still
+  never executed on a runner at all: the local runs prove the commands and the
+  sequence, not the machine.
+
+- **Choice:** add `schedule: - cron: "17 3 * * *"` to the existing workflow rather
+  than a second workflow file. A nightly that restated the setup steps would be a
+  second definition of how the gate runs, which is exactly the drift that this
+  workflow was fixed to stop.
+
+- **Reason:** the scheduled run is also where the Linux half of the README's
+  figures gets checked. Locally the gate measures the counts and writes them; with
+  `CI` set it verifies them instead, so a count that differed per platform would
+  fail the nightly rather than pass unnoticed on a laptop. The minute is 17 rather
+  than 0 because GitHub's scheduled runs queue behind the rest of the world on the
+  hour, where they can be delayed or dropped.
+
+- **Cost and limits:** a scheduled run spends runner minutes (free on a public
+  repository) and arrives a day late by nature. GitHub disables scheduled
+  workflows after 60 days without repository activity and emails the owner, so
+  "nightly" can silently stop being nightly. Nothing announces a failure except
+  the Actions tab, and a failing nightly nobody opens is not a check. Most of all:
+  the trigger could not be executed here - GitHub runs a schedule on the default
+  branch, on its own clock - so this is verified as configuration and unverified
+  as a run.
+
+- **Enforced, not just agreed:** `tests/unit/ci-parity.test.ts` fails if the
+  schedule trigger is dropped, reading the workflow with the same line regex the
+  rest of that suite uses. It was exercised in both directions: the assertion
+  fails once the trigger is removed, and the workflow was restored
+  byte-identically afterwards.
+
+- **Verified:** the workflow parses with a real YAML loader (PyYAML) to push on
+  `main`, `pull_request`, and `schedule: [{cron: "17 3 * * *"}]`, with the job's
+  three run commands and five steps unchanged - so the nightly and the PR path
+  are one job rather than two that can drift apart. The parity suite is green at
+  8 tests including the new one, and `npm run ci` is green with the figures
+  re-synced to 318 unit/integration + 13 e2e.
+
+## 2026-10-14 - The nightly widens the matrix: a second Node line, and Firefox
+
+The nightly job is now a matrix over Node (`22`, `24`) and engine (`chromium`,
+`firefox`); a push or a PR still runs the single leg it always did.
+
+- **Problem:** the gate ran one configuration. Node 22 was pinned in CI while the
+  machine this is developed on runs 24, so the version the developer uses was
+  never the version CI checked, and a toolchain break on either side would have
+  been found late or not at all. The engine was worse: this app's whole point is
+  moving files between browsers, `docs/INTEROP.md` records Firefox rows as done
+  and passing, and the _gate_ never opened Firefox once - so a Firefox
+  regression would surface only when somebody ran the by-hand interop script or
+  picked up a real device.
+
+- **Choice:** widen the same job rather than add a second one. The matrix axes
+  are the Node version and the engine, both widened by an expression only when
+  `github.event_name == 'schedule'`, so a pull request runs exactly the one leg it
+  ran before. The engine comes from `E2E_BROWSERS`, read by `playwright.config.ts`
+  (default Chromium), and each leg installs and drives exactly one browser - which
+  is also why the axes are separate legs rather than one leg with a comma-separated
+  engine list: a comma inside a matrix value is not something to bet a workflow on,
+  and a failure now names the leg it came from.
+
+- **Reason:** a pull request gets the fast answer its diff deserves, and the
+  combinations that are about drift - a second runtime, a second engine - are
+  paid for once a night instead of on every push. It is the same trade the nightly
+  itself was built on.
+
+- **Cost and limits:** the nightly is four full gate runs (free minutes on a
+  public repository, and they run in parallel). WebKit cannot be one of them at
+  all: Playwright's WebKit build has WebRTC disabled, because WebKitGTK's
+  `enable-webrtc` setting defaults to false, and the Windows build ships without
+  `RTCPeerConnection` - so `playwright.config.ts` refuses `webkit` by name and
+  prints that reason instead of starting a run that fails for a cause nobody here
+  can fix. The engine axis therefore has two values, and a third engine means
+  adding the project and the browser install, not a config line. The matrix
+  expressions themselves cannot be executed here - GitHub evaluates them - so the
+  axis widening is verified as configuration: parsed with a real YAML loader,
+  asserted on the exact expressions, and unrunnable locally by construction.
+
+- **Not weakened to make it pass:** two Firefox problems were found by running
+  the suite there, and both fixes are at the harness, not the assertion. The
+  clipboard is seeded differently on Firefox, because Playwright answers
+  `Unknown permission: clipboard-read`; the app still calls `navigator.clipboard`
+  and the same paste route runs. And the peer-drop test now waits 45 s instead of
+  30 s, because that 30 s was the app's _exact_ worst case (15 s of silence,
+  doubled to 30 s while the browser reports only `disconnected`) and Firefox sits
+  in `disconnected` longer than Chromium, so the doubled deadline landed outside
+  the window. The assertion is unchanged; the bound now sits above the contract
+  instead of exactly on it. Both are recorded in docs/INTEROP.md, which is where
+  the engine rows live.
+
+- **Verified:** the whole suite passes on both engines locally (Chromium 13/13 in
+  24 s, Firefox 13/13 in 47 s), and the full gate is green twice over - once on
+  the default Chromium configuration, which re-synced the README figures to 326
+  unit/integration + 13 e2e, and once with `E2E_BROWSERS=firefox`, which reported
+  `README.md is current` against the same figures. That second run is why there is
+  no "skip the figures" mode: every leg measures the same numbers, so every leg
+  can check them. `E2E_BROWSERS=chrome` and `E2E_BROWSERS=webkit` both stop the run
+  at config load, naming the offending engine and, for WebKit, the reason. New
+  guards: `tests/unit/e2e-browsers.test.ts` (5 tests) pins the default and both
+  refusals, and `tests/unit/gate-figures.test.ts` covers the mode decision
+  (`--check`, `--write`, the CI default, a typo, and two contradictory flags).
+
+## 2026-10-15 - The WebKit leg: scoped to what the engine can run, and off the gate
+
+The third engine is driven now, but only over the specs it can actually run:
+`npm run test:webkit` runs every spec except pairing on WebKit, on its own
+scheduled job. This supersedes the "WebKit cannot be one of them at all" limit in
+the entry above.
+
+- **Problem:** refusing WebKit by name meant the engine whose behaviour differs
+  most from the others had no automated coverage at all - and it is the engine the
+  PRD's degradation story is about. A browser with no WebRTC has to say so clearly,
+  and only WebKit has that property for real; the app's guest-side support check
+  exists _because_ of a WebKit-only finding, and nothing in CI exercised it in a
+  real browser. The limitation is also one spec wide: pairing needs
+  `RTCPeerConnection` and the build has none, but the settings sheet, the debug
+  panel, the shortcuts and every degradation path need nothing of the sort.
+
+- **Choice:** scope the engine instead of refusing or skipping. `playwright.config.ts`
+  gives WebKit a project whose `testIgnore` excludes exactly
+  `pairing-transfer.spec.ts`, and adds `tests/e2e/degradation.spec.ts` for the rest.
+  That spec is deliberately one code path on all three engines: an init script sets
+  `RTCPeerConnection` to `undefined` - a no-op on WebKit, a real removal on Chromium
+  and Firefox - so the PR legs cover the degradation messaging too, and WebKit is
+  where the absence is genuine rather than injected. The WebKit project also reads
+  its engine from the npm script name (`engineList`), because `npm run test:webkit`
+  has to mean WebKit on any platform and this project has no cross-platform way to
+  set the variable inside the script.
+
+- **Reason:** the engine's limitation is one spec wide, and refusing the whole
+  engine threw away seventeen runnable specs to avoid two unrunnable ones. What the
+  leg buys is the only thing no other engine can give: the app meeting a real
+  absence of the API it is built on, with nothing stubbed. The suite already had a
+  documented case of getting that wrong - the guest paths answered a missing
+  WebRTC with a _network_ failure - so a real browser exercising the message is
+  worth more than the two specs the engine cannot take.
+
+- **Cost and limits - why it is not a leg of the gate:** excluding the pairing spec
+  makes WebKit collect a smaller suite than `README.md` describes. As a matrix
+  engine it would fail the figure check for a difference that is structural, not a
+  regression; and in a local `write` run it would record the smaller count as the
+  published figure, which is the wrong number the whole figure arrangement exists
+  to prevent. So it is a separate job, scheduled only like the widened matrix legs,
+  and `figureMode()` refuses `E2E_BROWSERS=webkit` before any stage runs, naming
+  the command meant for it. The scheduled job is the only place this runs, so the
+  leg's Linux behaviour is still unproven here; and Playwright's WebKit is not
+  Safari, which docs/INTEROP.md says in as many words.
+
+- **Findings, and what the spec therefore does not assert:** measured on the
+  served origin, WebKit has no `showSaveFilePicker`, no `RTCPeerConnection`, but
+  does have `navigator.storage.getDirectory` - so `chooseSink()` (PRD 8.5) resolves
+  to the OPFS sink, the Safari path the design assumes, and the degradation spec
+  pins that detection input on every engine. But the OPFS write round trip
+  **fails** on this build: `createWritable()` throws `UnknownError` while Firefox
+  and Chromium complete it. So no test claims the OPFS save path works on WebKit -
+  asserting the browser's own bug would turn a future WebKit fix into a red build -
+  and the gap is recorded in docs/INTEROP.md instead. The gap has a product face
+  too: `isOpfsSupported()` checks only that `getDirectory` exists, so on this build
+  the app would choose OPFS and fail mid-transfer rather than fall back to memory.
+  Not changed here, because there is no evidence real Safari shares the limitation.
+
+- **Verified:** the WebKit leg passes 17/17 locally (19 specs minus the 2 pairing
+  tests), with the degradation file running against the genuine absence of the API;
+  Chromium 19/19 and Firefox 19/19, so both gate engines still collect the same
+  suite. `E2E_BROWSERS=webkit npm run ci` stops before a stage runs and leaves
+  `README.md` untouched, which was checked by diffing the file across the attempt.
+  The gate is green end to end and re-synced the README figures to 331
+  unit/integration + 19 e2e. New guards: `e2e-browsers.test.ts` (7 tests) pins the
+  scoping against the specs actually on disk, so a widened ignore list or a new
+  spec silently outside the run fails there; `ci-parity.test.ts` checks the WebKit
+  job is separate, scheduled, installs its own browser first, names its engine, and
+  never enters the `gate` list; `gate-figures.test.ts` covers the refusal.
+
+## 2026-10-15 - The debug panel reports what the browser can do, from the app's own detection
+
+The panel gained five rows: WebRTC, File System Access, OPFS, whether OPFS can
+actually be written to, and the sink `chooseSink()` would take.
+
+- **Problem:** the panel showed the build, the service worker, the cache and the
+  session, but nothing about what the _browser_ can do - which is what most often
+  explains a field report. A device that cannot pair, or that stages onto a path
+  it cannot write, looked exactly like one that had simply not tried yet. The
+  storage layer had already anticipated this: `chooseSink()`'s doc comment says
+  the chosen kind "is surfaced so the debug panel can log it", and nothing used
+  it.
+
+- **Choice:** every value comes from the function the real path runs on -
+  `isWebRtcSupported`, `isFsaSupported`, `isOpfsSupported`, `chooseSink().kind`
+  - so the panel reports the decision this device makes rather than a second
+    opinion about it. One question those functions do not answer is added as a new
+    probe, `probeOpfsWrite`: a scratch write into the staging directory that
+    cleans up after itself and answers `false` instead of throwing on every failure
+    mode. Reachability and writability are separate rows because on real builds
+    they are separate facts.
+
+- **Reason:** the panel's job is to make a field report answerable without a
+  debugger, and "which path did this device take" is the first question that
+  makes a report actionable. The WebKit build is the proof: measured through the
+  panel, it reads `OPFS yes / OPFS write fails / Save sink opfs` - it would stage
+  onto a sink it cannot write to, which a reachability check alone reports as
+  perfectly healthy. The contradiction is now visible on the device, not just in
+  this repository's notes.
+
+- **Cost and limits:** opening the panel writes one small file into the app's own
+  OPFS staging directory, removes it, and probes once per mount rather than on
+  the panel's 2 s health poll. The panel is part of the initial bundle, so the
+  rows, the probe and the five label pairs in both catalogs cost 1.6 KB gz
+  (135.1 -> 136.7, budget 153.6) - paid up front on the home screen route. That
+  is the price of a field report that answers the capability question without a
+  debugger; nothing here is on the transfer path itself. The rows make `debug-panel.spec.ts` the one
+  engine-keyed e2e spec - the right answer depends on which browser is running,
+  so it carries a per-engine table like the interop matrix. The write row pins
+  only that the probe _answered_ on WebKit, never which verdict: the current
+  answer is `fails`, and pinning that would turn a future WebKit fix into a red
+  nightly. On the engines whose transfers stage through OPFS it does pin `ok`,
+  because the suite's own guest save depends on that path working.
+
+- **Verified:** unit - 4 new panel tests (stubbed detections and probe: the
+  healthy path, the memory-only browser, the reachable-but-unwritable split, and
+  the row staying `—` until the probe answers) and 5 new probe tests (write and
+  cleanup, unwritable, failed write, no namespace, unopenable directory);
+  `sinks.test.ts` 25, `debug.test.tsx` 20, `i18n.test.ts` 7 on the new keys in
+  both catalogs. E2E - the same spec run on all three engines in one pass (9/9),
+  then read back out of real WebKit through the panel with the documented
+  gesture: `WebRTC no / File System Access no / OPFS yes / OPFS write fails / Save
+sink opfs`, `page errors: []`.
+
+## 2026-10-15 - A sink that refuses the file costs the file no more
+
+The receiver now falls back to memory for a file whose chosen sink refuses it
+before a byte has landed, instead of failing the transfer.
+
+- **Problem:** the sink is chosen by feature detection and then opened, and on a
+  build where those two answers disagree - the measured WebKit shape, where
+  `getDirectory` exists and every `createWritable` throws - the file simply
+  failed. The reported reason was worse than uninformative: `toErrorCode` did not
+  know `SinkError`, so the storage layer's own mapping (a refused write is
+  `DISK_FULL` there) collapsed into `SINK_UNAVAILABLE` on the wire, telling the
+  user their browser lacked an API that it had just advertised. And the failure
+  arrived at the one moment a fallback is free: nothing staged, nothing lost.
+
+- **Choice:** building the sink and opening it are now one guarded step, and a
+  refusal falls back to memory for that file alone (PRD 8.5's fallback order ends
+  there anyway). Two exclusions, both about not losing data or agency: a resumed
+  transfer is never restarted into memory, because its prefix lives in the sink
+  that just refused and the tail alone would be a file with a hole in it; and a
+  cancellation is reported rather than absorbed, because a dismissed save picker
+  is the user's decision, not the storage layer failing. The refused sink is
+  aborted on the way past, so an empty `.part` does not linger in the staging
+  directory. `toErrorCode` now honours `SinkError.code`, which is what carries
+  the sink's real reason to the wire.
+
+- **Reason:** the alternative was to probe writability when _selecting_ a sink -
+  the debug panel's probe already does exactly that for its own report - and it
+  was rejected as the fix: it costs a file creation per incoming file, it can
+  still race (the probe succeeds and the real open fails), and the failure it
+  guards against is only reachable at the point the fallback now sits. Detection
+  is left shallow for the same reason, and because there is still no evidence
+  real Safari shares the limitation. What the transfer _cannot_ absorb is a sink
+  that fails after bytes have landed; that stays a failure, and the per-chunk
+  repair path (FR-17) is the tool for the case where the bytes arrived wrong.
+
+- **Cost and limits:** the fallback is silent at the protocol level - the file
+  arrives, the sender sees a normal completion, and only the saved row's
+  `sink: "memory"` says where it went (the UI already renders a memory save as a
+  download). There is no per-file "this one went to RAM" notice; that would need
+  a new event through receiver -> session -> UI, and it is the obvious follow-up
+  rather than something to invent here. A file past the 1 GiB memory cap
+  (FR-31) still fails, reporting the sink's own reason. The change also makes two
+  previously _silent_ failures visible: a sink that cannot be built and a resume
+  that cannot open now send their `err` frame, which is what
+  `accept()`'s comment always claimed happened.
+
+- **Verified:** 6 new tests. `tests/integration/transfer.test.ts` (32 tests) falls
+  back with a double, drives the **real** `OpfsSink` against the exact
+  `UnknownError` Playwright's WebKit build throws - file byte-identical, saved as
+  `memory`, nothing reported - reports the sink's own `DISK_FULL` when memory
+  cannot take the file either, refuses to restart a resumed transfer, and reports
+  a dismissed picker instead of staging it in RAM. `tests/unit/sinks.test.ts`
+  pins that `toErrorCode` carries each `SinkError` code. Full gate green:
+  346 unit/integration + 19 e2e tests, 136.8 KB gz of 153.6 KB (the fallback cost
+  0.1 KB), Lighthouse 99/100/100/100, network and release audits pass.
+
+## 2026-10-18 - DoD 6 was not true: the precache held only the shell
+
+- **Problem:** DoD 6 says the app works offline after first load, and the worker's
+  precache listed only `./` (the shell). The app code-splits, so the settings
+  sheet, the two repair paths and the hashing worker are separate chunks that are
+  only requested the first time a user reaches them. On a first visit those
+  requests are made _before_ the worker has claimed the page, so they never pass
+  through its fetch handler and never reach the cache. A device that had never
+  opened Settings could not open Settings offline: the dynamic import failed, the
+  button did nothing, and the app said nothing about it.
+
+  Nothing caught it because every offline check so far was "does the app boot",
+  and the app booted — it was the code-split routes that were broken.
+
+- **Choice:** `scripts/postbuild.mjs` now walks `dist/` after every build and
+  rewrites the worker's precache list with every emitted file — entry script, CSS,
+  each code-split chunk, the worker script and the self-hosted fonts (~446 KB).
+  `public/sw.js` carries a `__PRECACHE__` marker for it to replace, and the
+  stamping fails the build loudly if that marker is missing, because a silent
+  no-op here would ship the broken worker behind a green build. The shell is
+  added first and on its own (`addAll(["./"])`), then the rest one at a time with
+  a caught rejection and a `console.warn`, because `addAll` rejects as a unit and
+  one 404 would otherwise cost the app every offline asset rather than one.
+
+- **Reason:** The alternative was to warm the cache by driving the app through
+  every screen before going offline, which is what the test would have done
+  naturally, and it is the wrong fix twice over: it only helps the test that does
+  it, and it leaves a real user who has not pressed the button yet without the
+  chunk. Precaching is what "works offline" actually means.
+
+- **Cost and limits:** ~446 KB is fetched at install rather than on demand, so a
+  first visit on a slow connection now pays for the repair paths it may never
+  reach. That is the standard trade for an offline-first PWA and the size is
+  dominated by fonts that are needed anyway. `sw.js` itself is deliberately not
+  precached: the browser fetches the worker through its own update path, where a
+  cached copy would be the wrong copy.
+
+- **Verified:** 3 new tests in `tests/e2e/offline.spec.ts` (home screen, deep
+  `?screen=` route, and recovery when the network returns), 2 in
+  `tests/unit/pwa.test.ts` pinning the marker and the precache shape, and the
+  settings-sheet step in the e2e test is the one that actually reproduces the
+  bug — a dead button, not a failed assertion.
+
+## 2026-10-18 - Cache lookups ignore `Vary`, or precached chunks never match
+
+- **Problem:** Even with the chunk in the cache, the settings sheet still failed
+  offline with `net::ERR_FAILED`. The cause was `Vary: Origin`, which
+  `vite preview` sends on static files. The Cache API honours `Vary` by default,
+  so the lookup compared it: the worker's own `cache.add` requests carry no
+  `Origin` header, while a module script fetched by `import()` does, so the
+  request that needed the copy was told it wanted a different representation than
+  the one stored. The response was sitting in the cache the whole time and the
+  lookup simply declined it.
+
+- **Choice:** Every cache lookup in the worker goes through one `lookup()` helper
+  that passes `{ ignoreVary: true }`.
+
+- **Reason:** `Vary` is a statement about how a _server_ varies its answer on
+  request headers. It is not a statement about whether two requests want the same
+  static file, and a same-origin hashed asset is one file whatever headers the
+  browser attached. Honouring it here made offline depend on a response header
+  that several common static servers and dev servers set for reasons unrelated to
+  this app.
+
+- **Cost and limits:** None for this app — the precache is written by this worker
+  for itself, and every entry is a same-origin immutable hashed file, so there is
+  no representation to vary. It would be wrong in a worker serving
+  user-generated or negotiated content, which is not what this one does.
+  `tests/unit/pwa.test.ts` asserts there is no bare `caches.match(` left in the
+  worker, since one unguarded lookup reintroduces the whole failure.
+
+- **Verified:** the settings-sheet step in `tests/e2e/offline.spec.ts` fails
+  without the fix and passes with it, and a direct `caches.match` probe showed
+  the entry present, status 200, `content-type: text/javascript` — present and
+  unmatched, which is what identified `Vary` as the cause rather than a guess.
+
+## 2026-10-18 - What DoD 6 can and cannot be tested against here
+
+- **Problem:** DoD 6 is "works offline after first load (airplane mode + hotspot
+  still pairs)". The pairing half cannot be automated on this machine.
+  Playwright's `setOffline` cuts the whole network stack, WebRTC included, so with
+  both contexts offline the pairing reaches `WAITING_FOR_REPLY` and then `FAILED`
+  — which is the emulated network refusing ICE, not the app refusing anything. But
+  DoD 6's case is the opposite one: the internet is gone and the _local link to
+  the other device is not_. Reproducing that needs a second network the peer can
+  still reach, which two browser contexts on one machine do not have.
+
+- **Choice:** Automate the half that is about the app and mark the rest honestly.
+  `tests/e2e/pairing-transfer.spec.ts` pairs two offline devices as far as the
+  codes go — both produce an offer and a reply from cached pages with the origin
+  unreachable, through the shared-link route, with no console errors. The data
+  channel itself stays a row in the manual matrix in `docs/INTEROP.md`, needing a
+  phone on the other end of a real hotspot.
+
+- **Reason:** The tempting alternative is a test that goes offline and asserts the
+  transfer completes, which would either fail for a reason that is the harness's
+  or need a skip that hides it. Either way the matrix would show a covered row
+  that nothing covered.
+
+- **Cost and limits:** A reader of the pairing spec should know the codes-offline
+  test stops before the connection, so the comment above it says so plainly. The
+  offline _app_ half is fully automated, and it is the half that was actually
+  broken.

@@ -32,8 +32,23 @@ const stamped = sw.match(/const CACHE = "dropbeam-" \+ "([^"]+)"/)?.[1] ?? null;
 const buildId = stamped === "__BUILD_ID__" ? null : stamped;
 const hasSkipWaiting = sw.includes("self.skipWaiting()");
 const hasClaim = sw.includes("self.clients.claim()");
-const hasCacheFirst = sw.includes("caches.match(request)");
+// The static-asset path goes through the `lookup()` helper, which is where the
+// `ignoreVary` lives, so cache-first is proven by the helper existing and being
+// used — not by one exact call site that a refactor would silently rename.
+const hasLookupHelper = sw.includes("function lookup(") && sw.includes("lookup(request)");
+const hasCacheFirst = sw.includes("caches.match(request");
+const hasIgnoreVary = sw.includes("ignoreVary: true");
 const hasThirdPartyFetch = /https?:\/\/(?!['"])/.test(sw);
+
+// DoD 6. The precache has to hold every emitted asset, not just the shell: the
+// app code-splits, so a shell-only precache leaves Settings and the repair
+// paths unreachable offline. In `public/` that list is still the `__PRECACHE__`
+// marker (Vite has not hashed the filenames yet); in `dist/` it is the stamped
+// list. Checking the wrong one would pass a build that stamped nothing.
+const shellLine = sw.match(/^const SHELL = \[(.*)\];$/m)?.[1] ?? "";
+const hasPrecacheMarker = shellLine.includes("__PRECACHE__");
+const precacheCount = (shellLine.match(/"/g) ?? []).length / 2;
+const stampedBuild = !swSource.startsWith(publicDir);
 
 const problems = [];
 
@@ -45,7 +60,17 @@ if (!buildId)
   );
 if (!hasSkipWaiting) problems.push("sw.js missing self.skipWaiting()");
 if (!hasClaim) problems.push("sw.js missing self.clients.claim()");
-if (!hasCacheFirst) problems.push("sw.js missing cache-first static asset handling");
+if (!hasCacheFirst || !hasLookupHelper)
+  problems.push("sw.js missing cache-first static asset handling");
+// Without this the precached chunks are in the cache and still never match, so
+// offline fails on the very assets the precache exists for (see public/sw.js).
+if (!hasIgnoreVary) problems.push("sw.js cache lookups must ignore Vary (DoD 6)");
+if (stampedBuild && precacheCount <= 1)
+  problems.push(
+    "dist/sw.js precaches only the shell — postbuild did not stamp the asset list (DoD 6)",
+  );
+if (!stampedBuild && !hasPrecacheMarker)
+  problems.push("public/sw.js is missing the __PRECACHE__ marker postbuild rewrites (DoD 6)");
 if (hasThirdPartyFetch) problems.push("sw.js references an external URL");
 
 for (const icon of icons) {
@@ -84,7 +109,14 @@ console.log(" ".repeat(6) + bar("source", swSource.slice(root.length + 1)));
 console.log(" ".repeat(6) + bar("build id", buildId ?? "—"));
 console.log(" ".repeat(6) + bar("skip waiting", hasSkipWaiting));
 console.log(" ".repeat(6) + bar("claim", hasClaim));
-console.log(" ".repeat(6) + bar("cache first", hasCacheFirst));
+console.log(" ".repeat(6) + bar("cache first", hasCacheFirst && hasLookupHelper));
+console.log(" ".repeat(6) + bar("ignore vary", hasIgnoreVary));
+console.log(
+  " ".repeat(6) +
+    (stampedBuild
+      ? `[precache] ${precacheCount} entries`
+      : `[precache] ${hasPrecacheMarker ? "awaiting build stamp" : "MISSING MARKER"}`),
+);
 console.log(" ".repeat(6) + bar("external fetch", !hasThirdPartyFetch));
 console.log(" ".repeat(6) + bar("icons", icons.length));
 for (const icon of icons) {

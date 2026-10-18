@@ -45,18 +45,36 @@ it on one machine and join from a second browser profile).
 ## Checks
 
 ```sh
-npm run ci         # typecheck, lint, unit + integration tests, build,
-                   # size budget, PWA health, Playwright e2e
+npm run ci         # the whole gate: every stage in package.json's `gate` list,
+                   # in order - see docs/TESTING.md for what each one is
 ```
 
-Individual scripts: `npm run test` (Vitest), `npm run test:e2e` (Playwright),
-`npm run size` (gzip budget), `npm run pwa:health` (installability probe).
+Individual scripts: `npm run test` (Vitest), `npm run test:e2e` (Playwright on
+Chromium — `E2E_BROWSERS=firefox` for the second engine), `npm run test:webkit`
+(the WebKit leg, which cannot run the pairing spec — see docs/INTEROP.md),
+`npm run size` (gzip budget), `npm run pwa:health` (installability probe),
+`npm run audit:release` (Lighthouse + same-origin network audit).
 
-Current gate: 275 tests green (265 unit/integration + 10 e2e), initial JS
-~147.0 KB gz against a 153.6 KB budget, Lighthouse mobile **99 / 100 / 100 /
+Current gate: 379 tests green (351 unit/integration + 28 e2e), initial JS
+~136.8 KB gz against a 153.6 KB budget, Lighthouse mobile **99 / 100 / 100 /
 100** (Performance / Accessibility / Best practices / SEO), and a network audit
-over a real pairing + transfer showing only same-origin requests. Both checks
-are reproducible with `node scripts/audit-release.mjs` against `vite preview`.
+over a real pairing + transfer showing only same-origin requests. Both of those
+last checks run inside `npm run ci` as `npm run audit:release`: it starts and
+stops its own `vite preview` server, and fails the build if performance drops
+below 90, accessibility below 95, or a single request leaves the origin.
+
+Those figures are measured rather than typed: the gate reads them out of the run
+it just performed and rewrites them itself, so the numbers and the tests they
+describe are written by the same run. Under CI the same step checks them instead
+of writing, and fails the build if `README.md` is stale.
+
+The same gate runs in CI: on pushes and pull requests, and nightly on a
+schedule, since the Linux runner is an environment no local run can prove. The
+nightly runs it more than once — the other Node line, and Firefox beside
+Chromium — while a pull request keeps the single fast leg. A third, scheduled
+job runs the WebKit leg instead of the gate, because Playwright's WebKit build
+has no WebRTC: it drives everything except pairing, against a real absence of
+the API rather than a stubbed one.
 
 ## Using it
 
@@ -83,18 +101,23 @@ the hotspot trick and the browser support table.
 
 `v1.0`. Milestones M0–M8 are complete and gated by `npm run ci`: pairing,
 verification, approval, two-way transfers, the settings sheet, the PWA
-shell, and the release audit are all covered by 266 unit/integration and
-10 e2e tests, plus the documented manual matrix.
+shell, and the release audit are all covered by 351 unit/integration and
+28 e2e tests, plus the documented manual matrix.
 
 The automated half of the [interop matrix](docs/INTEROP.md) runs **real
 engines** — Chromium ↔ Chromium, Chromium ↔ Firefox in both directions,
-with real WebRTC over the paste route. What is deliberately _not_
-automated, and is listed there as field QA: the camera QR route, real
-Wi-Fi / hotspot / guest-network behaviour, real Safari (Playwright's
-Windows WebKit build has no WebRTC), and mobile power/screen behaviour.
+with real WebRTC over the paste route, plus WebKit on everything that does
+not need a peer. What is deliberately _not_ automated, and is listed there
+as field QA: the camera QR route, real Wi-Fi / hotspot / guest-network
+behaviour, real Safari and iOS (Playwright's WebKit build has no WebRTC, so
+its OPFS save path is measured as blocked — see the matrix), and mobile
+power/screen behaviour.
 
 The demo animation above is recorded by `node scripts/record-demo.mjs`;
 `node scripts/interop-matrix.mjs` re-runs the cross-engine rows and
 `node scripts/audit-release.mjs` re-runs the Lighthouse and network
 audits. A hidden diagnostic panel ships for field debugging: tap eight
-times on the right edge of the screen.
+times on the right edge of the screen to see the build id, the service
+worker and cache health, the session state, and what the browser can
+actually do — WebRTC, save-path support, whether OPFS accepts a write,
+and the sink this device would send files to.

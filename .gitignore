@@ -7,5 +7,6 @@ test-results/
 *.local
 .freebuff/
 graphify-out/
+graft/.cache/
 demo-recording/
 .DS_Store

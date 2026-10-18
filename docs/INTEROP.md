@@ -12,11 +12,14 @@ Codec used per browser pair, plus notes. `DB1` = minimal descriptor (PRD
 | Chromium ↔ Chromium (two browser contexts)                                                        | real WebRTC over loopback, DB1 codes exchanged as text/link | DB1   | pass (`tests/e2e/pairing-transfer.spec.ts`)                      | 2026-10-10 |
 | Chromium ↔ Chromium (peer disconnect)                                                             | same pair, host device removed                              | —     | guest reaches `PEER_LOST` with no console errors                 | 2026-10-10 |
 | Chromium ↔ Chromium (OPFS save path)                                                              | guest without File System Access                            | —     | file staged and saved (PRD 8.5 Firefox/Safari sink)              | 2026-10-10 |
+| Firefox ↔ Firefox (two browser contexts)                                                          | the nightly's second engine, same suite                     | DB1   | pass (19/19 on Windows; the nightly runs it on Linux)            | 2026-10-15 |
+| WebKit, whole suite minus the pairing spec                                                        | `npm run test:webkit`, scheduled job                        | —     | 17/17, real absence of WebRTC and real capability rows           | 2026-10-15 |
 | Chromium ↔ Firefox (two engines)                                                                  | real WebRTC, DB1 code pasted                                | DB1   | pass (`scripts/interop-matrix.mjs`)                              | 2026-10-10 |
 | Firefox ↔ Chromium (two engines)                                                                  | real WebRTC, DB1 code pasted                                | DB1   | pass (`scripts/interop-matrix.mjs`)                              | 2026-10-10 |
 | Chromium settings sheet (theme, hi, reduce motion, wake lock, STUN, persistence, Devanagari face) | —                                                           | —     | pass (`tests/e2e/settings.spec.ts`)                              | 2026-10-10 |
 | Production build, home screen                                                                     | Lighthouse, mobile profile, STUN off                        | —     | perf 99, a11y 100, bp 100, seo 100 (`scripts/audit-release.mjs`) | 2026-10-13 |
 | Production build, two browser contexts                                                            | network audit of a full pairing + file + note transfer      | DB1   | 14 requests, 0 off-origin (DoD 5)                                | 2026-10-13 |
+| Production build, network cut                                                                     | app boots from cache; both devices still exchange codes     | DB1   | pass (`tests/e2e/offline.spec.ts`, DoD 6)                        | 2026-10-18 |
 
 The first row runs the real `DB1` encode/decode and the full session
 pipeline in one process (only the WebRTC transport is faked — see
@@ -42,6 +45,16 @@ the paste route, DB1, matching verification words, guest saving through
 OPFS). They are loopback-on-one-machine, so they prove interop between
 engines — not LAN behaviour or camera QR.
 
+The Firefox row is the same suite on the second engine
+(`E2E_BROWSERS=firefox`), which the nightly runs on Linux beside Chromium.
+Two things had to move for it, and neither is a change to the app: the
+clipboard is seeded differently, because Playwright answers `Unknown
+permission: clipboard-read` on Firefox (`playwright.config.ts` and the spec
+say so where it happens), and the peer-drop assertion waits 45 s instead of
+the app's exact 30 s worst case, because Firefox reports only `disconnected`
+for longer than Chromium and the doubled deadline landed outside the old
+window.
+
 The last two rows are the release audit (`node scripts/audit-release.mjs`,
 against `vite preview`). The Lighthouse row is DoD 8: the mobile profile at
 412x823 scores performance 99 (gate ≥ 90) and accessibility 100 (gate ≥ 95),
@@ -53,6 +66,26 @@ and a note, and every one of the 14 requests is same-origin static
 (file://, script, stylesheet, font) with STUN off — nothing leaves the
 device. Both gates pass.
 
+The offline row is DoD 6. With the network cut the app still boots out of the
+service worker's cache, a deep `?screen=` route still resolves, the settings
+sheet still opens, and — from two separate offline contexts — an offer and a
+reply are still produced and exchanged through the shared-link route with no
+console errors. It stops before the data channel, and that limit is the
+emulator's rather than the app's: Playwright's `setOffline` cuts the whole
+network stack, WebRTC included, so an offline pair reaches `WAITING_FOR_REPLY`
+and then `FAILED` — the emulated network refusing ICE. DoD 6's case is the
+opposite one, where the internet is gone and the _local link to the peer is
+not_, which needs a second network the peer can still reach. That is why the
+hotspot row below still needs two real devices.
+
+Building that row found two real defects, both in the worker and both invisible
+to any test that only asked "does the app boot": the precache held the shell
+alone, so a device that had never opened Settings could not open Settings
+offline (the settings sheet is a code-split chunk), and every cache lookup
+honoured `Vary`, so `Vary: Origin` from a static server stopped a precached
+chunk from matching itself. Both are fixed and covered — see
+`docs/DECISIONS.md` for the reasoning and the alternatives rejected.
+
 `unused-javascript` is the one audit scoring below 0.9 and is expected:
 the home screen never runs the transfer pipeline, so most of the 135 KB
 initial bundle is unused _on that route_. Splitting it further would move
@@ -61,21 +94,71 @@ latency onto the transfer path to win a number the gates do not measure.
 category (50), which is about AI crawlers discovering the site and is not
 a DoD requirement for a page that only talks to its paired peer.
 
-The WebKit rows of the manual matrix **cannot** be run here: Playwright's
-WebKit build for Windows ships without `RTCPeerConnection`, so no pairing
-is possible. That gap produced one useful finding, now fixed and covered
-by a unit test: the app used to answer "Join" in such a browser with a
-_network_ failure instead of "This browser can't do direct transfers".
-Both entry points now run the support check. Real Safari (macOS/iOS)
-still needs hardware.
+The WebKit rows of the manual matrix **cannot be paired here**: Playwright's
+WebKit build for Windows ships without `RTCPeerConnection`, and the Linux
+build has WebRTC disabled too — WebKitGTK's `enable-webrtc` setting defaults
+to false — so no pairing is possible on either platform. That is why the
+pairing spec is excluded from WebKit's project (`playwright.config.ts`) rather
+than skipped inside the spec, and why a WebKit leg would fail the gate's own
+figure check: it collects a smaller suite than `README.md` describes. So it runs
+off the gate, as `npm run test:webkit` on a scheduled job, and
+`scripts/gate-figures.mjs` refuses `E2E_BROWSERS=webkit` by name.
 
-> **Manual matrix status (2026-10-10): partially covered.** The browser
-> pairs that do not need a phone are done above (Chromium ↔ Chromium and
-> Chromium ↔ Firefox, real engines, real WebRTC). What remains needs
-> physical devices on real networks: the QR route (camera), the Wi-Fi /
+Everything else in the suite **does** run on WebKit, and it is the only engine
+where the degradation path is exercised for real: no `RTCPeerConnection` is
+injected or removed, so the unsupported-browser messaging, the self-test's
+`unsupported` stage, the settings sheet and the debug panel meet the genuine
+absence of the API. On Chromium and Firefox the same spec runs too, with the API
+removed by an init script, so the pull-request legs cover the behaviour without
+WebKit. That arrangement produced three findings worth recording:
+
+- **The sink WebKit resolves to is OPFS.** No `showSaveFilePicker`, but
+  `navigator.storage.getDirectory` is there, so `chooseSink()` (PRD 8.5) picks
+  the Safari path. `tests/e2e/degradation.spec.ts` pins that detection input on
+  every engine.
+- **The OPFS write itself fails on this build.** `createWritable()` throws
+  `UnknownError` on Playwright's WebKit while Firefox and Chromium both complete
+  the round trip. So the save path is _not_ verified on WebKit, and no test claims
+  it is — asserting a browser's own bug would turn a future WebKit fix into a red
+  build. Real Safari 18+ is expected to write; that half still needs hardware.
+- **The detection is shallower than the capability — and that no longer costs
+  the file.** `isOpfsSupported()` checks only that `getDirectory` exists, so on a
+  build like this one the app still _selects_ the OPFS sink before discovering
+  that nothing can be written through it. The receiver now treats a refusal
+  before a byte has landed — the sink cannot be built, or cannot be opened — as a
+  reason to fall back to memory for that one file, so a device with an
+  unwritable namespace gets it as a download instead of
+  a failure, and the reason reported is the sink's own (`toErrorCode` honours
+  `SinkError` codes instead of re-deriving one from the DOM exception).
+  `tests/integration/transfer.test.ts` drives the real `OpfsSink` against the
+  exact `UnknownError` measured here. The detection itself is deliberately left
+  alone: there is no evidence that real Safari shares the limitation, and probing
+  on every selection would cost a file creation for a case the fallback already
+  absorbs.
+
+  Both halves are now visible on the device itself: the debug panel (FR-50)
+  reports reachability and writability as separate rows next to the sink
+  `chooseSink()` would take, so a field report from a real phone can show a
+  browser staging onto a path it cannot write. Measured through the panel on this
+  WebKit build: `OPFS yes / OPFS write fails / Save sink opfs`, with no page
+  errors.
+
+One earlier finding from this same gap is already fixed and covered by a unit
+test: the app used to answer "Join" in a browser without WebRTC with a
+_network_ failure instead of "This browser can't do direct transfers". Both entry
+points now run the support check, and the degradation spec guards the same
+regression through the real UI.
+
+> **Manual matrix status (2026-10-18): partially covered, and the gap is now
+> smaller.** The browser pairs that do not need a phone are done above (Chromium
+> ↔ Chromium and Chromium ↔ Firefox, real engines, real WebRTC), and DoD 6's
+> offline claim is now automated as far as this emulator allows (above). What
+> remains needs physical devices on real networks: the camera QR route, Wi-Fi /
 > hotspot / guest-network behaviour, real Safari, and mobile power/screen
-> behaviour — the last gate before `v1.0` (PRD M8). Fill the cells as each
-> pair is tested.
+> review — the last gate before `v1.0` (PRD M8). **DoD 1 (500 MB QR-only Chrome
+> ↔ Android), DoD 2 (50 MB QR + link Chrome ↔ iPhone) and DoD 6's data-channel
+> half all live in those rows.** Nothing below can be filled in from a desk.
+> Record each cell as it is tested.
 
 ## Manual (fill during M8)
 
