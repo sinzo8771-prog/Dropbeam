@@ -298,18 +298,27 @@ to Chromium; otherwise the npm script's own name decides, so `npm run test:webki
 means WebKit wherever it is run. Firefox is the second engine because its WebRTC
 works.
 
-A third job runs the WebKit leg — `npm run test:webkit`, scheduled only, never a
-leg of the gate. Playwright's WebKit build has no `RTCPeerConnection`, so its
-project excludes the pairing spec and it collects fewer tests than the README
-states: as a matrix engine it would fail the figure check for a difference that
-is not a regression, and a local `write` run would have recorded the smaller
-count as the published one. So `scripts/gate-figures.mjs` refuses
-`E2E_BROWSERS=webkit` outright, naming the command meant for it;
-`ci-parity.test.ts` pins that the leg stays a separate scheduled job that
-installs its own browser first, and never appears in the `gate` list; and
+A third job runs the WebKit leg — `npm run test:webkit`, never a leg of the
+gate and never on a push or pull request. Playwright's WebKit build has no
+`RTCPeerConnection`, so its project excludes the pairing spec and it collects
+fewer tests than the README states: as a matrix engine it would fail the figure
+check for a difference that is not a regression, and a local `write` run would
+have recorded the smaller count as the published one. So
+`scripts/gate-figures.mjs` refuses `E2E_BROWSERS=webkit` outright, naming the
+command meant for it; `ci-parity.test.ts` pins that the leg stays a separate job
+that installs its own browser first, and never appears in the `gate` list; and
 `gate-figures.test.ts` covers the refusal itself. What the leg buys is the one
 thing no other engine can give — the degradation path against a real absence of
 the API, with nothing stubbed (see docs/INTEROP.md).
+
+The leg runs on the schedule, and on demand: the workflow takes a
+`workflow_dispatch` trigger and the job's own condition accepts that event too.
+A job reachable only at 03:17 UTC is a job nobody can check — a bad browser
+version or a renamed step would go unnoticed for a day at a time, and a green
+nightly would say nothing about whether the leg had ever executed. Both halves
+are pinned, because they fail in opposite directions: the trigger without the
+condition would leave the leg unreachable, and the condition without the
+trigger would leave it reported as `skipped`, which reads as health.
 
 The scheduled run also exists for what no commit can trigger: the runner
 environment itself — the Ubuntu image, the browser builds, what npm hands back —

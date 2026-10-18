@@ -4,6 +4,12 @@ on:
   push:
     branches: [main]
   pull_request:
+  # By hand, for the legs below that a push cannot reach. The WebKit job is
+  # gated on the event, so without this there is no way to run it except
+  # waiting for the next 03:17 UTC - which means a wiring mistake in that job
+  # stays invisible for a day, and there is no way to check the leg after
+  # changing the browser version without editing the schedule to match.
+  workflow_dispatch:
   # Nightly, because a push or PR trigger only ever exercises the runner when
   # something changed in this repository. The runner environment - the Ubuntu
   # image, the Chromium build, what npm hands back - drifts on its own, and a
@@ -68,14 +74,20 @@ jobs:
   # that is structural rather than a regression. `scripts/gate-figures.mjs`
   # refuses a WebKit gate run outright, and the parity suite pins that too.
   #
-  # Scheduled only, like the widened matrix legs: this run is about a browser
+  # Scheduled, like the widened matrix legs: this run is about a browser
   # build drifting under the suite, not about the change in hand. It is also the
   # only place the app meets a real absence of WebRTC - the unsupported-browser
   # messaging and the connection self-test run there with nothing stubbed, while
   # the pull requests covering that same behaviour do it with the API removed by
   # an init script (tests/e2e/degradation.spec.ts).
+  #
+  # Or dispatched by hand, because a job that only runs at 03:17 UTC is a job
+  # nobody can check. The manual trigger runs the whole workflow, so this
+  # condition has to accept it too - `workflow_dispatch` alone would still skip
+  # this job, which would leave the leg no more reachable than it was. The
+  # parity suite pins both halves of that.
   webkit:
-    if: github.event_name == 'schedule'
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

@@ -1476,3 +1476,54 @@ encountered an internal error` on `page.reload()` and `page.goto()` while the
 
 - **Verified:** nothing to run; this records why the log reads the way it does.
   `docs/INTEROP.md` remains the authority on what is still open.
+
+## 2026-10-18 - The nightly legs can be run by hand
+
+- **Context:** The WebKit leg was added tonight and gated on
+  `github.event_name == 'schedule'`, with no other way to reach it. Checking the
+  repository afterwards showed the honest consequence: no scheduled run had ever
+  fired, because the job and the `schedule` trigger both landed after that day's
+  03:17 UTC window. The first automatic execution was therefore the following
+  morning - and until then nothing could tell whether the job was wired to the
+  right engine, installed the right browser, or ran at all.
+
+  A job that can only be started at one fixed hour is a job nobody can check.
+  The same applies to the widened matrix legs: changing the WebKit browser
+  version means either waiting a day to see the effect or editing the cron to
+  make the nightly run early, which is a worse way to ask the question.
+
+- **Alternatives considered:**
+  - Add `workflow_dispatch` alone. Rejected, and quietly wrong: the job's
+    condition tests the event name, so a manual dispatch would skip the very job
+    it was dispatched to run, and the run would report `skipped` - which reads
+    as health.
+  - Fold the leg into the nightly's own run so a hand-trigger and a nightly are
+    literally the same job. Rejected: they are not the same question. The nightly
+    exists to catch runner drift on a schedule nobody is watching; a dispatch is
+    someone asking a question now, and a red manual run should be read as an
+    answer rather than as the nightly failing.
+  - Give the WebKit job its own workflow file. Rejected for the reason the
+    original decision records: one workflow, one setup path.
+
+- **Choice:** add `workflow_dispatch:` to the existing workflow's triggers, and
+  extend the WebKit job's condition to
+  `github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'`.
+  Both halves, together, or neither: either alone reproduces the original
+  problem in a new form.
+
+- **Reason:** a manual dispatch is an escape hatch, and an escape hatch that
+  reports `skipped` is not one. Pinning both halves in `ci-parity.test.ts` means
+  neither can rot unnoticed - the trigger is asserted against the workflow, the
+  condition against the job, so removing either one fails the suite rather than
+  quietly narrowing what CI runs.
+
+- **Cost and limits:** anyone can now start a run on demand, which consumes
+  Actions minutes; the schedule remains the primary path and the manual trigger
+  is for questions, not for routine runs. The manual run still takes the
+  default branch and still verifies rather than writes the README figures,
+  because `CI` is set either way.
+
+- **Verified:** `npm run ci` green. The job's condition, the trigger, and the
+  WebKit job's absence from the `gate` list are all pinned by `ci-parity.test.ts`;
+  the WebKit leg itself was then dispatched by hand against this commit and
+  passed, which is the first time that job has ever run in CI.

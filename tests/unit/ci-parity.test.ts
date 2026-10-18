@@ -115,6 +115,21 @@ describe("CI parity (the workflow and the local gate)", () => {
     expect(triggers).toMatch(/cron:\s*"[^"]+"/);
   });
 
+  it("can be dispatched by hand, so the schedule-only legs are reachable", () => {
+    // The WebKit job is gated on the event name. Without a manual trigger there
+    // is no way to run it except waiting for 03:17 UTC, so a mistake in that
+    // job - a bad browser version, a renamed step, the job wired to the wrong
+    // engine - would sit undiscovered for a day at a time, and a green nightly
+    // would say nothing about whether the leg had ever executed.
+    //
+    // The other half of this is the job's own condition, pinned in the test
+    // above. A trigger with no matching condition is the quieter failure of the
+    // two: the workflow runs, the leg reports `skipped`, and it reads as health.
+    const triggers = /^on:\n([\s\S]*?)^jobs:/m.exec(workflow)?.[1] ?? "";
+    expect(triggers, "the workflow must have a trigger block").not.toBe("");
+    expect(triggers).toContain("workflow_dispatch:");
+  });
+
   it("installs the browser the gate needs, before the gate runs", () => {
     const needsBrowser = stages.some(
       (stage) => stage.includes("test:e2e") || stage.includes("audit:release"),
@@ -127,7 +142,7 @@ describe("CI parity (the workflow and the local gate)", () => {
     expect(install).toBeLessThan(gate);
   });
 
-  it("runs the WebKit leg on its own, on the schedule, off the gate", () => {
+  it("runs the WebKit leg on its own, off the gate, reachable by hand", () => {
     // The job's own slice, from its header to the end of the file: a line-level
     // reader cannot tell which job a step belongs to, and the point here is that
     // WebKit is *not* a leg of the matrix job above.
@@ -136,7 +151,14 @@ describe("CI parity (the workflow and the local gate)", () => {
     // Separate job rather than an engine axis entry: an axis entry would run the
     // gate on this engine, and its scoped suite cannot match the README figures.
     expect(job).not.toContain("matrix.");
-    expect(job).toMatch(/^\s*if:\s*github\.event_name == 'schedule'\s*$/m);
+    // Scheduled *or* dispatched. Both halves matter and they fail differently:
+    // drop `workflow_dispatch` from the workflow and the leg is unreachable
+    // until 03:17 UTC tomorrow; drop it from this condition and the leg is
+    // unreachable ever, because a manual dispatch would skip the very job it was
+    // dispatched to run. Neither failure shows up in a green nightly.
+    expect(job).toMatch(
+      /^\s*if:\s*github\.event_name == 'schedule'\s*\|\|\s*github\.event_name == 'workflow_dispatch'\s*$/m,
+    );
     expect(job).toContain("npm run test:webkit");
     expect(job).toMatch(/E2E_BROWSERS:\s*webkit\s*$/m);
     // Its browser, installed before the run - the same ordering the gate leg has.
