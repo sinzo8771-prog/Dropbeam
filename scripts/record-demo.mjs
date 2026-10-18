@@ -124,9 +124,29 @@ const FONT_CANDIDATES = [
   "/System/Library/Fonts/Supplemental/Arial.ttf",
 ];
 const font = FONT_CANDIDATES.find((p) => statSync(p, { throwIfNoEntry: false }));
+
+/**
+ * The label sits in a strip of its own, never on top of the app.
+ *
+ * Drawn over the pane it used to land on whatever the app had at the top of
+ * the screen at that moment: on the host that is the "Dropbeam" wordmark, and on
+ * the guest the verification words, so the label and the content were printed
+ * over each other and neither was readable. Overlaying cannot be fixed by
+ * nudging the label, because what is underneath changes with the step.
+ *
+ * So the app keeps its full 760 px viewport and the strip is added around it,
+ * in the app's own paper token. A pane label then reads as device chrome above
+ * the screen rather than as text fighting it, and it cannot overlap whatever
+ * the app renders - which is also what makes it safe for the demo to grow a
+ * step later without this breaking again.
+ */
+const STRIP = 44;
+const PAPER = "0xF6F2EA"; // --paper, light theme (tokens.css)
+const INK = "0x1B1A17"; // --ink
+
 const draw = (text, x) =>
   font
-    ? `drawtext=fontfile=${basename(font)}:text=${text.replace(/ /g, "\\ ")}:x=${x}:y=16:fontsize=20:fontcolor=white:box=1:boxcolor=black@0.55:boxborderw=10`
+    ? `drawtext=fontfile=${basename(font)}:text=${text.replace(/ /g, "\\ ")}:x=${x}:y=13:fontsize=18:fontcolor=${INK}`
     : null;
 // The stitched frame is 380 + 380 px wide, so the right pane's label
 // starts one pane-width in.
@@ -135,9 +155,11 @@ if (font) copyFileSync(font, join(WORK, basename(font)));
 
 // Side-by-side: the two devices, one frame, like a split-screen demo. The
 // leading blank frames (before the pages paint) are trimmed.
+const pane = (label) =>
+  `[${label}:v]setpts=PTS-STARTPTS,scale=380:760,pad=380:${760 + STRIP}:0:${STRIP}:color=${PAPER}`;
 const filter = [
-  "[0:v]setpts=PTS-STARTPTS,scale=380:760[a];",
-  "[1:v]setpts=PTS-STARTPTS,scale=380:760[b];",
+  `${pane(0)}[a];`,
+  `${pane(1)}[b];`,
   "[a][b]hstack=inputs=2[v0];",
   `[v0]${labels.join(",")}[v]`,
 ].join("");
