@@ -68,9 +68,38 @@ const WEBKIT_UNRUNNABLE = /pairing-transfer\.spec\.ts$|offline\.spec\.ts$/;
  * `scripts/gate-figures.mjs` refuses `E2E_BROWSERS=webkit` rather than measure
  * the README against a suite that was never run.
  */
+
+/**
+ * Firefox preferences the suite needs — and the one thing it must not do is
+ * change what is being tested.
+ *
+ * By default Firefox mDNS-obfuscates its host ICE candidates, which is the
+ * right default for a person on a laptop: the other device finds you by a
+ * `.local` name instead of by your LAN address. It needs working multicast for
+ * that, and the hosted CI runner has none — so under the app's Local ICE mode
+ * (`iceServers: []`, PRD 8.3) Firefox gathered nothing at all and failed
+ * outright, `WebRTC: ICE failed, add a STUN server`. That is the runner's
+ * network, not the app: nothing in the transfer path changed, and the fix is
+ * emphatically not to add a STUN server, which would bend the privacy model to
+ * suit a harness.
+ *
+ * Turning the obfuscation off makes Firefox behave like every other engine here:
+ * plain host candidates, no third party, no multicast. It is a launch
+ * preference rather than an init script so it is in force before any peer
+ * connection exists, and it costs the specs nothing — they pair two contexts on
+ * one machine, where an obfuscated candidate would have been useless anyway.
+ *
+ * Whether a real user's machine behaves the same when its network blocks
+ * multicast is not something this suite can answer. That is recorded in
+ * docs/INTEROP.md rather than assumed either way.
+ */
+const FIREFOX_LAUNCH = {
+  firefoxUserPrefs: { "media.peerconnection.ice.obfuscate_host_addresses": false },
+} as const;
+
 const ENGINES = {
   chromium: { use: devices["Desktop Chrome"] },
-  firefox: { use: devices["Desktop Firefox"] },
+  firefox: { use: { ...devices["Desktop Firefox"], launchOptions: FIREFOX_LAUNCH } },
   webkit: { use: devices["Desktop Safari"], testIgnore: WEBKIT_UNRUNNABLE },
 } as const;
 
