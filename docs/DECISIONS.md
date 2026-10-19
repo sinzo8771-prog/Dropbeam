@@ -1759,3 +1759,43 @@ encountered an internal error` on `page.reload()` and `page.goto()` while the
   one added line; the two claims are corrected in the 2026-10-19 entry above
   and in the 2026-10-15 entry it supersedes; the nightly's legs are green as
   recorded in the entries above.
+
+## 2026-10-19 · Two PRD 13.1 claims were documentation; now they are tests
+
+- **Problem:** PRD §13.1 lists the unit suite, and `docs/TESTING.md` repeated
+  that list as a description of what the suite covers - including "filename
+  sanitizer (table-driven with hostile inputs)" and "backpressure controller
+  (simulated `bufferedAmount`)". Neither had a test. The sanitizer had one
+  assertion, in the sink spec, covering the path-separator case; the
+  backpressure controller had none at all, so the one thing standing between a
+  fast sender and a browser's memory was described in the docs and exercised
+  nowhere. §13.3 asks for the camera scanner to be tested "with a fake video
+  stream feeding a generated QR image": the pixels half was covered (a rendered
+  QR is rasterised and decoded back with the real jsQR), but the stream half -
+  the part only a camera reaches - was not.
+
+- **Choice:** write the three missing tests rather than soften the claim. The
+  filename table is hostile inputs with the expected answer beside each row;
+  the backpressure controller is driven by a stub channel whose `bufferedAmount`
+  the test moves, through both the event path and the poll fallback; the
+  scanner is given a fake stream and a stub detector, and the assertions are
+  about the wiring - the camera constraints, the code that comes back, the
+  duplicate suppression, the clean release.
+
+- **Reason:** a documented capability that no test exercises is a claim, and
+  this project has already been bitten by exactly that twice today - the
+  WebKit leg's "passed" line and the Linux build's WebRTC - both of which were
+  written down and false. The cost of the table is that a change in the rules
+  now shows up as a changed row, which is the point of writing it down.
+
+- **Cost and limits:** the scanner's test drives a stub detector, so it proves
+  the plumbing and not the vision; the real decode is covered separately by the
+  uqr → jsQR round trip, and a real camera is still a manual row. The
+  backpressure test asserts the PRD's thresholds rather than any engine's
+  behaviour, so it would not notice an engine that fires the event late - the
+  poll fallback is there for that, and it is tested.
+
+- **Verified:** `npm run test` is 385 green (was 361); the three files are
+  `tests/unit/filename.test.ts`, `tests/unit/backpressure.test.ts` and
+  `tests/unit/scanner.test.ts`; `npm run ci` is green and the README's figures
+  follow.

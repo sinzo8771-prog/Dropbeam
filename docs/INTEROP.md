@@ -178,10 +178,12 @@ That arrangement produced three findings worth recording:
 > Node process (about thirty milliseconds) and on a blank page in the same
 > browser; the app's own `PeerSession.createOffer()` succeeds against the same
 > origin. Waiting does not help - a document whose first attempt failed never
-> recovers - and neither does turning off candidate obfuscation, blocking or
-> removing the service worker, removing the user agent, warming the browser, or
-> loading the page a second time. The offline pairing spec passes, because it
-> pairs with the network cut.
+> recovers - and neither does turning off candidate obfuscation, allowing
+> loopback candidates, turning site isolation off, disabling DoH, or removing the
+> proxy. The hosted Linux runner's Firefox offers **no** candidate at all for a
+> page served over HTTP: a raw `RTCPeerConnection` in that page, with no app
+> code involved, gathers nothing (`iceGatheringState: new`, zero
+> `icecandidate` events) and the connection goes straight to `failed`.
 >
 > So the pairing path in Firefox is **not** covered on the hosted runner, and a
 > user whose first page in a freshly started Firefox is this app may see the

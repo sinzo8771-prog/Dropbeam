@@ -20,7 +20,8 @@ Commands:
 Codecs (round trip, size budget, invalid input), SDP template, compact candidate
 parsing, multi-frame QR assemble/shuffle/duplicates, pairing-link build/parse
 (including the in-tab `hashchange` route), single-QR budget vs multi-frame
-fallback, QR pixel round trip (uqr → jsQR), filename sanitizer (table-driven
+fallback, QR pixel round trip (uqr → jsQR), the camera scanner against a fake
+video stream (PRD 13.3), filename sanitizer (table-driven
 with hostile inputs), protocol encode/decode, backpressure controller
 (simulated `bufferedAmount`), state machine transitions and timeouts,
 verification phrase determinism, settings store allowlist and hostile payloads
