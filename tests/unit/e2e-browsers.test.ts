@@ -70,9 +70,10 @@ describe("e2e engine selection", () => {
     // says and what it does, and this project has no cross-platform way to set
     // the variable inside the script itself.
     expect(engineList({ npm_lifecycle_event: "test:webkit" })).toBe("webkit");
-    expect(
-      projectsFor(engineList({ npm_lifecycle_event: "test:webkit" })).map((p) => p.name),
-    ).toEqual(["webkit"]);
+    // The same for the Firefox leg, which is a job of its own for the same
+    // reason the WebKit one is: its suite is smaller, so it cannot be a leg of
+    // the gate.
+    expect(engineList({ npm_lifecycle_event: "test:firefox" })).toBe("firefox");
     // Every other invocation - the gate's own `test:e2e`, a bare
     // `npx playwright test` - is the default engine.
     expect(engineList({ npm_lifecycle_event: "test:e2e" })).toBe("chromium");
@@ -107,21 +108,54 @@ describe("e2e engine selection", () => {
   });
 
   it("leaves the engines that can pair whole", () => {
-    // The other engines run every spec in the directory - no per-engine skip,
-    // since a skip is what would make their counts disagree with the README.
-    for (const project of [...projectsFor("chromium"), ...projectsFor("firefox")]) {
+    // Chromium runs every spec in the directory - no per-engine skip, since a
+    // skip is what would make its counts disagree with the README. Firefox
+    // does too, except on Linux, where the runner's engine cannot gather a
+    // local candidate at all; the next test covers that.
+    for (const project of projectsFor("chromium")) {
       expect(project.testIgnore).toBeUndefined();
+    }
+    const [firefox] = projectsFor("firefox");
+    if (process.platform === "linux") {
+      expect(firefox?.testIgnore).toBeInstanceOf(RegExp);
+    } else {
+      expect(firefox?.testIgnore).toBeUndefined();
+    }
+  });
+
+  it("excludes the pairing spec from Firefox on Linux, and only there", () => {
+    // The hosted Linux runner's Firefox goes straight to `failed` before
+    // gathering starts, so the pairing specs cannot pair there and the app
+    // reports ICE_GATHER_TIMEOUT. The exclusion is per project rather than a
+    // skip inside the file, because a skip hides the fact that this engine
+    // collects a smaller suite - and that difference is what keeps the Firefox
+    // leg off the gate's figure check. On Windows the spec still runs.
+    const [firefox] = projectsFor("firefox");
+    const ignore = firefox?.testIgnore as RegExp | undefined;
+    if (process.platform === "linux") {
+      expect(ignore).toBeInstanceOf(RegExp);
+      expect(ignore?.test("pairing-transfer.spec.ts")).toBe(true);
+      // Nothing else is excluded: the rest of the suite is exactly what
+      // Firefox can run here.
+      const others = readdirSync(specDir)
+        .filter((name) => name.endsWith(".spec.ts"))
+        .filter((name) => name !== "pairing-transfer.spec.ts");
+      expect(others.filter((name) => ignore?.test(name))).toEqual([]);
+    } else {
+      expect(ignore).toBeUndefined();
     }
   });
 
   it("launches Firefox without host-candidate obfuscation", () => {
-    // Firefox mDNS-obfuscates its host ICE candidates by default, which needs
-    // working multicast. The hosted runner has none, so under the app's Local
-    // mode it gathered nothing and failed with `WebRTC: ICE failed, add a STUN
-    // server` - a run where the transfer path was never reached and the spec
-    // just timed out waiting for a code. Pinned because losing the preference
-    // later would look exactly like a product regression rather than a runner
-    // that quietly changed.
+    // Firefox mDNS-obfuscates its host ICE candidates by default, which leaves
+    // them as `.local` names that the other end has to resolve over multicast.
+    // The specs here pair two contexts on one machine, where a name that has
+    // to be resolved is one more thing that can fail for reasons that have
+    // nothing to do with the app, so the suite asks for plain addresses.
+    //
+    // This preference is not what makes Firefox work on the hosted runner -
+    // it does not (see the exclusion above, and docs/INTEROP.md): it is here
+    // because plain candidates are the ones a loopback pairing can use.
     const [project] = projectsFor("firefox");
     const use = project?.use as unknown as {
       launchOptions?: { firefoxUserPrefs?: Record<string, unknown> };

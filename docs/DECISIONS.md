@@ -1676,15 +1676,24 @@ encountered an internal error` on `page.reload()` and `page.goto()` while the
   every time, and the same gather on the app's page in a plain Node process
   gathers every time.
 
-- **Cost and limits:** the nightly's widened matrix (Node 22 + 24 × Chromium +
-  Firefox) will be red on the Firefox legs while this stands, and the watchdog
-  reports it every morning. That is the point of the watchdog - a nightly
-  failure nobody reads is a nightly failure nobody fixes - but a nightly that
-  is always red is also a nightly nobody reads, so the coverage decision
-  (drop Firefox from the nightly, or exclude the pairing spec from the Firefox
-  project the way WebKit's is excluded, which then needs the figure check to
-  know that Firefox collects fewer tests) is left to be made deliberately
-  rather than by accident.
+- **Cost and limits:** the nightly's Firefox leg used to run the whole gate, and
+  would have been red on the two pairing specs every single night. A leg that
+  is always red proves nothing about the other twenty-six specs it also runs,
+  and a watchdog that reports a known limitation every morning is a watchdog
+  people stop reading - so the leg was narrowed rather than left broken. The
+  coverage question is settled below.
+
+- **The narrowing.** Firefox's project now excludes the pairing spec **on
+  Linux** (on Windows it still runs, and passes there), so on the runner the
+  Firefox collection is smaller than the README's figures - the same situation
+  the WebKit leg is in, and for the same reason. That makes the Firefox leg a
+  job of its own running `npm run test:firefox`, exactly like the WebKit leg:
+  the gate's figures are the gate's, and the gate stays Chromium's on both Node
+  lines. The gate's other stages do not depend on the engine, so nothing is
+  lost by them running in the Chromium legs only. The exclusion is per project
+  rather than a skip inside the file, because a skip hides the fact that this
+  engine collects a smaller suite - and that difference is exactly what keeps
+  the leg off the figure check.
 
 - **Verified:** CI runs `39243475462` (widened matrix, all four legs),
   `39244996799` and `39265197964` (the same after the user agent was unpinned),
@@ -1692,8 +1701,12 @@ encountered an internal error` on `page.reload()` and `page.goto()` while the
   `ICE_GATHER_TIMEOUT`; the trace artifacts show
   `iceConnectionState: failed` with no candidate events; `tests/e2e/degradation.spec.ts`
   still pins the missing-API path on all three engines with nothing stubbed;
-  `tests/unit/ci-parity.test.ts` still pins the WebKit exclusion, the
-  manual-dispatch trigger and the matrix separation.
+  `tests/unit/ci-parity.test.ts` pins the new legs - the gate's is Chromium and
+  checks the figures, the Firefox one runs `npm run test:firefox` and the
+  WebKit one `npm run test:webkit`, neither of which is a gate stage;
+  `tests/unit/e2e-browsers.test.ts` pins that Firefox excludes the pairing spec
+  on Linux and only there; and on Windows `npm run test:firefox` still collects
+  and passes all twenty-eight, pairing included.
 
 - **Open risk for M8:** the Firefox pairing path on Linux has never completed
   an automated run. Whether the cause is the hosted runner's network, the

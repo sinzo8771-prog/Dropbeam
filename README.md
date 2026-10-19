@@ -55,7 +55,7 @@ Chromium — `E2E_BROWSERS=firefox` for the second engine), `npm run test:webkit
 `npm run size` (gzip budget), `npm run pwa:health` (installability probe),
 `npm run audit:release` (Lighthouse + same-origin network audit).
 
-Current gate: 387 tests green (359 unit/integration + 28 e2e), initial JS
+Current gate: 389 tests green (361 unit/integration + 28 e2e), initial JS
 ~137.0 KB gz against a 153.6 KB budget, Lighthouse mobile **99 / 100 / 100 /
 100** (Performance / Accessibility / Best practices / SEO), and a network audit
 over a real pairing + transfer showing only same-origin requests. Both of those
@@ -70,19 +70,19 @@ of writing, and fails the build if `README.md` is stale.
 
 The same gate runs in CI: on pushes and pull requests, and nightly on a
 schedule, since the Linux runner is an environment no local run can prove. The
-nightly runs it more than once — the other Node line, and Firefox beside
-Chromium — while a pull request keeps the single fast leg. A third, scheduled
-job runs the WebKit leg instead of the gate: it drives everything except
-pairing, which no WebKit build here has ever done, and reports the browser's own
-capabilities per platform — the two builds disagree, which is why that table is
-keyed by platform rather than by engine.
+nightly runs the gate more than once — the other Node line — while a pull
+request keeps the single fast leg. Two more legs run the e2e suite on their
+own, each for an engine the gate cannot carry: Firefox, and WebKit, which
+cannot pair at all. The WebKit leg reports the browser's own capabilities per
+platform — the two builds disagree, which is why that table is keyed by
+platform rather than by engine.
 
 One thing the nightly cannot yet prove, and says so rather than hiding: Firefox
-cannot gather local ICE candidates on the hosted Linux runner at all, so the two
-specs that pair a live network fail there while everything else in that leg
-passes. The cause is the engine rather than the app — the same gather succeeds
-in a plain process on the same machine — and it is written up, with everything
-that was ruled out, in [docs/INTEROP.md](docs/INTEROP.md) and
+cannot gather local ICE candidates on the hosted Linux runner at all, so the
+pairing specs are excluded from Firefox there and Firefox's leg runs the rest.
+The cause is the engine rather than the app — the same gather succeeds in a
+plain process on the same machine — and it is written up, with everything that
+was ruled out, in [docs/INTEROP.md](docs/INTEROP.md) and
 [docs/DECISIONS.md](docs/DECISIONS.md).
 
 ## Using it
@@ -110,7 +110,7 @@ the hotspot trick and the browser support table.
 
 `v1.0`. Everything buildable and testable from a desk is gated by `npm run ci`:
 pairing, verification, approval, two-way transfers, the settings sheet, the PWA
-shell and the release audit are all covered by 359 unit/integration and
+shell and the release audit are all covered by 361 unit/integration and
 28 e2e tests. M8 is the one milestone with work left, and none of it is code: it
 is the hardware rows of the [interop matrix](docs/INTEROP.md), which need two
 physical devices on a real network. That matrix, not a commit message, is the

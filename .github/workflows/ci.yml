@@ -30,16 +30,14 @@ jobs:
   build-and-test:
     runs-on: ubuntu-latest
     # One leg on a push or a PR: the answer that diff deserves, as fast as it can
-    # be given. The nightly widens both axes, because those combinations are
-    # about drift rather than about the change in hand - the other Node line, and
-    # the second engine. Every leg runs the one gate command; only the
-    # environment differs, and the matrix is what makes that environment visible
-    # in the report.
+    # be given. The nightly widens the Node axis, because those combinations are
+    # about drift rather than about the change in hand. Every leg runs the one
+    # gate command; only the environment differs, and the matrix is what makes
+    # that environment visible in the report.
     strategy:
       fail-fast: false
       matrix:
         node: ${{ github.event_name == 'schedule' && fromJSON('["22", "24"]') || fromJSON('["22"]') }}
-        engine: ${{ github.event_name == 'schedule' && fromJSON('["chromium", "firefox"]') || fromJSON('["chromium"]') }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -51,7 +49,7 @@ jobs:
       # specs and the release audit both drive a real browser. --with-deps also
       # pulls the system libraries Chromium needs on the hosted runner, and the
       # leg's own engine is the only one downloaded.
-      - run: npx playwright install --with-deps ${{ matrix.engine }}
+      - run: npx playwright install --with-deps chromium
       # The gate itself, taken verbatim from package.json. Spelling the
       # stages out here instead is how this job fell behind `npm run ci`
       # before - it never ran pwa:health, and nothing could notice, because
@@ -62,7 +60,37 @@ jobs:
           # specs are engine-agnostic, so every leg collects the same tests and
           # measures the same figures - which is why every leg also checks the
           # README against them rather than stepping around them.
-          E2E_BROWSERS: ${{ matrix.engine }}
+          E2E_BROWSERS: chromium
+
+  # The second engine, which runs the e2e stage and not the whole gate.
+  #
+  # The hosted Linux runner's Firefox cannot offer a local ICE candidate at all,
+  # so its project excludes the pairing spec and collects fewer tests than
+  # README.md states - the same situation the WebKit leg is in, and the same
+  # reason it cannot check those figures. The gate's other stages do not depend
+  # on the engine, so the Chromium legs above still run them on both Node lines;
+  # what this leg adds is the engine, on the platform no local run can prove.
+  build-and-test-firefox:
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        node: ${{ fromJSON('["22", "24"]') }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+      - run: npm ci
+      - run: npx playwright install --with-deps firefox
+      # `npm run test:firefox` rather than `npm run test:e2e`: the script's own
+      # name is what selects the engine, and a name of its own keeps this leg
+      # from naming one of the gate's stages (which the parity suite forbids,
+      # because the gate's stages live in one list and the workflow must not
+      # know what they are).
+      - run: npm run test:firefox
 
   # The third engine, which is not a leg of the gate.
   #

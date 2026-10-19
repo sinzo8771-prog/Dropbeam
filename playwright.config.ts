@@ -52,8 +52,8 @@ const WEBKIT_UNRUNNABLE = /pairing-transfer\.spec\.ts$|offline\.spec\.ts$/;
  * over real connections.
  *
  * WebKit is included, but scoped rather than driven whole. It genuinely cannot
- * pair — Playwright's WebKit build ships without `RTCPeerConnection` on Windows,
- * and WebKitGTK's `enable-webrtc` setting defaults to false on Linux — so the
+ * pair - Playwright's WebKit build ships without `RTCPeerConnection` on Windows,
+ * and on Linux the build does have the API but has never paired here - so the
  * pairing spec is excluded for it. It also cannot navigate while the network is
  * emulated down, so the offline spec is excluded for it too. Everything else
  * runs, and on WebKit it runs against the *real* absence of the API: the
@@ -73,33 +73,48 @@ const WEBKIT_UNRUNNABLE = /pairing-transfer\.spec\.ts$|offline\.spec\.ts$/;
  * Firefox preferences the suite needs — and the one thing it must not do is
  * change what is being tested.
  *
- * By default Firefox mDNS-obfuscates its host ICE candidates, which is the
- * right default for a person on a laptop: the other device finds you by a
- * `.local` name instead of by your LAN address. It needs working multicast for
- * that, and the hosted CI runner has none — so under the app's Local ICE mode
- * (`iceServers: []`, PRD 8.3) Firefox gathered nothing at all and failed
- * outright, `WebRTC: ICE failed, add a STUN server`. That is the runner's
- * network, not the app: nothing in the transfer path changed, and the fix is
- * emphatically not to add a STUN server, which would bend the privacy model to
- * suit a harness.
- *
- * Turning the obfuscation off makes Firefox behave like every other engine here:
- * plain host candidates, no third party, no multicast. It is a launch
+ * Firefox mDNS-obfuscates its host ICE candidates by default, which leaves
+ * them as `.local` names the other end has to resolve over multicast. The
+ * specs here pair two contexts on one machine, where a name that has to be
+ * resolved is one more thing that can fail for reasons that have nothing to
+ * do with the app, so the suite asks for plain host candidates. It is a launch
  * preference rather than an init script so it is in force before any peer
- * connection exists, and it costs the specs nothing — they pair two contexts on
- * one machine, where an obfuscated candidate would have been useless anyway.
+ * connection exists.
  *
- * Whether a real user's machine behaves the same when its network blocks
- * multicast is not something this suite can answer. That is recorded in
- * docs/INTEROP.md rather than assumed either way.
+ * It is *not* what makes Firefox work on the hosted runner — it does not (see
+ * `FIREFOX_LINUX_UNPAIRABLE` below, and docs/INTEROP.md for the measurement).
  */
 const FIREFOX_LAUNCH = {
   firefoxUserPrefs: { "media.peerconnection.ice.obfuscate_host_addresses": false },
 } as const;
 
+/**
+ * The specs Firefox cannot run on Linux.
+ *
+ * The hosted Linux runner's Firefox will not offer a local ICE candidate at
+ * all: the agent goes straight to `failed` before gathering starts, so the
+ * app reports `ICE_GATHER_TIMEOUT` and the pairing specs cannot pair. The
+ * same gather succeeds on Firefox on Windows, on every other engine, and -
+ * in a plain process on the runner itself - so the cause is the runner
+ * rather than the app. `docs/INTEROP.md` has the measurement and everything
+ * that was ruled out; `docs/DECISIONS.md` has why it is scoped rather than
+ * worked around.
+ *
+ * Scoped per project rather than skipped inside the file, for the reason the
+ * WebKit exclusion above gives: a skip hides the fact that this engine
+ * collects a smaller suite, and that difference is what keeps the Firefox leg
+ * off the gate's figure check.
+ *
+ * Linux-only on purpose: on Windows the spec still runs, and passes there.
+ */
+const FIREFOX_LINUX_UNPAIRABLE = /pairing-transfer\.spec\.ts$/;
+
 const ENGINES = {
   chromium: { use: devices["Desktop Chrome"] },
-  firefox: { use: { ...devices["Desktop Firefox"], launchOptions: FIREFOX_LAUNCH } },
+  firefox: {
+    use: { ...devices["Desktop Firefox"], launchOptions: FIREFOX_LAUNCH },
+    testIgnore: process.platform === "linux" ? FIREFOX_LINUX_UNPAIRABLE : undefined,
+  },
   webkit: { use: devices["Desktop Safari"], testIgnore: WEBKIT_UNRUNNABLE },
 } as const;
 
@@ -108,14 +123,17 @@ const ENGINES = {
  *
  * `E2E_BROWSERS` when it is set: that is how CI names the leg, and how a
  * developer runs a second engine locally. Otherwise the npm script's own name,
- * because `npm run test:webkit` has to mean WebKit — a script that quietly ran
- * Chromium instead would be the widest possible gap between what a command says
- * and what it does. The alternative, setting the variable inside the script,
- * needs a cross-platform env helper this project does not depend on.
+ * because `npm run test:webkit` has to mean WebKit and `npm run test:firefox`
+ * has to mean Firefox — a script that quietly ran Chromium instead would be the
+ * widest possible gap between what a command says and what it does. The
+ * alternative, setting the variable inside the script, needs a cross-platform
+ * env helper this project does not depend on.
  */
 export function engineList(env: Record<string, string | undefined>): string {
   if (env.E2E_BROWSERS) return env.E2E_BROWSERS;
-  return env.npm_lifecycle_event === "test:webkit" ? "webkit" : "chromium";
+  if (env.npm_lifecycle_event === "test:webkit") return "webkit";
+  if (env.npm_lifecycle_event === "test:firefox") return "firefox";
+  return "chromium";
 }
 
 /**

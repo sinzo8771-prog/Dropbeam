@@ -29,6 +29,7 @@
     "test:watch": "vitest",
     "test:e2e": "playwright test",
     "test:webkit": "playwright test",
+    "test:firefox": "playwright test",
     "size": "node scripts/size-budget.mjs",
     "pwa:health": "node scripts/pwa-health.mjs",
     "audit:release": "node scripts/audit-release.mjs",

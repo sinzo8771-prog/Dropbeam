@@ -177,4 +177,47 @@ describe("CI parity (the workflow and the local gate)", () => {
     expect(scripts["test:webkit"]).toBeDefined();
     expect(stages).not.toContain("test:webkit");
   });
+
+  it("runs the Firefox leg off the gate too, for the same reason", () => {
+    // On the hosted Linux runner the engine cannot offer a local ICE candidate,
+    // so its project excludes the pairing spec and collects fewer tests than
+    // README.md states - the same situation the WebKit leg is in. A gate that
+    // ran it would fail the figure check for a structural reason, and a local
+    // `write` run would record the smaller count as the published one.
+    //
+    // The gate's other stages do not depend on the engine, so the Chromium
+    // legs still run them on both Node lines; what this leg adds is the engine
+    // on the platform no local run can prove.
+    const job = /^ {2}build-and-test-firefox:\n([\s\S]*?)(?=^ {2}\S)/m.exec(workflow)?.[0] ?? "";
+    expect(job, "the Firefox job must exist").not.toBe("");
+    // A separate job, not an engine axis entry in the gate job: an axis entry
+    // would run the gate on this engine. A Node matrix is fine - it is the
+    // engine that has to stay out.
+    expect(job).not.toContain("matrix.engine");
+    // Scheduled *or* dispatched, for the reason the WebKit leg has it: a leg
+    // that only runs at 03:17 UTC is a leg nobody can check. Drop the
+    // dispatch from this condition and the leg is unreachable until tomorrow
+    // morning - and nobody would notice, because the nightly would still run
+    // it.
+    expect(job).toMatch(
+      /^\s*if:\s*github\.event_name == 'schedule'\s*\|\|\s*github\.event_name == 'workflow_dispatch'\s*$/m,
+    );
+    // Its own script name, which is what selects the engine, so the workflow
+    // does not name one of the gate's stages.
+    expect(job).toContain("npm run test:firefox");
+    expect(job).not.toContain("npm run ci");
+    expect(scripts["test:firefox"]).toBeDefined();
+    expect(stages).not.toContain("test:firefox");
+    // Its browser, installed before the run - the same ordering the gate leg has.
+    const install = job.indexOf("npx playwright install --with-deps firefox");
+    const run = job.indexOf("npm run test:firefox");
+    expect(install).toBeGreaterThanOrEqual(0);
+    expect(run).toBeGreaterThanOrEqual(0);
+    expect(install).toBeLessThan(run);
+    // And the gate job itself is Chromium, so the figures the README states are
+    // the ones the gate measures.
+    const gateJob = /^ {2}build-and-test:\n([\s\S]*?)(?=^ {2}\S)/m.exec(workflow)?.[0] ?? "";
+    expect(gateJob).toContain("npm run ci");
+    expect(gateJob).toMatch(/E2E_BROWSERS:\s*chromium\s*$/m);
+  });
 });

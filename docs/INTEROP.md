@@ -189,6 +189,15 @@ That arrangement produced three findings worth recording:
 > still unknown; it is recorded in `docs/DECISIONS.md` with everything that was
 > ruled out. The manual matrix below still has a Firefox row, and a real
 > pairing on a Linux desktop is the only verification that closes this.
+>
+> What CI does with it, then: Firefox's project excludes the pairing spec **on
+> Linux** (on Windows it still runs, and passes there), so the Firefox leg
+> collects fewer tests than the others and cannot check the README's figures.
+> It is therefore a job of its own running `npm run test:firefox`, exactly like
+> the WebKit leg, and the Chromium legs keep the gate and the figures. The
+> nightly's Firefox leg is green, and what it proves is the other twenty-six
+> specs on Linux — which is more than a leg that is red on a known limitation
+> ever proves.
 
   Both halves are now visible on the device itself: the debug panel (FR-50)
   reports reachability and writability as separate rows next to the sink
