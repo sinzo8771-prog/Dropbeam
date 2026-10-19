@@ -122,9 +122,10 @@ stamped build id in place:
 - **Degradation** — the app in a browser with no WebRTC: the "can't do direct
   transfers" message on both home-screen entry points and on the shared `#j=`
   link route, the self-test's `unsupported` stage with the PRD 7.1 wording, and
-  the sink-detection contract behind `chooseSink()` (PRD 8.5). Chromium and
-  Firefox get the API removed by an init script; on WebKit it is genuinely absent,
-  and `npm run test:webkit` runs the same file that way.
+  the sink-detection contract behind `chooseSink()` (PRD 8.5). Every engine gets
+  the API removed by an init script, so `npm run test:webkit` runs the same file
+  the same way — which matters, because the two WebKit builds disagree about
+  whether the API is there in the first place (see docs/INTEROP.md).
 - **Debug panel** — the 8-tap reveal gesture against real timers, the real
   service-worker health rows, and the capability rows (FR-50): WebRTC, File
   System Access, OPFS, whether OPFS can actually be written to, and the sink
@@ -299,11 +300,12 @@ means WebKit wherever it is run. Firefox is the second engine because its WebRTC
 works.
 
 A third job runs the WebKit leg — `npm run test:webkit`, never a leg of the
-gate and never on a push or pull request. Playwright's WebKit build has no
-`RTCPeerConnection`, so its project excludes the pairing spec and it collects
-fewer tests than the README states: as a matrix engine it would fail the figure
-check for a difference that is not a regression, and a local `write` run would
-have recorded the smaller count as the published one. So
+gate and never on a push or pull request. It excludes the pairing spec — the
+Windows build has no `RTCPeerConnection` and the Linux build's has never been
+paired for real — so it collects fewer tests than the README states: as a matrix
+engine it would fail the figure check for a difference that is not a regression,
+and a local `write` run would have recorded the smaller count as the published
+one. So
 `scripts/gate-figures.mjs` refuses `E2E_BROWSERS=webkit` outright, naming the
 command meant for it; `ci-parity.test.ts` pins that the leg stays a separate job
 that installs its own browser first, and never appears in the `gate` list; and

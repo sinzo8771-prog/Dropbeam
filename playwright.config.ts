@@ -22,9 +22,12 @@ const PORT = 4199;
  * Two, for two different reasons, and both are properties of the harness rather
  * than of the app:
  *
- * 1. `pairing-transfer` needs a real `RTCPeerConnection`. Playwright's WebKit
- *    build ships without one on Windows, and WebKitGTK's `enable-webrtc` setting
- *    defaults to false on Linux, so no pairing is possible on either platform.
+ * 1. `pairing-transfer` needs a real `RTCPeerConnection`. The Windows build
+ *    ships without one, measured (the debug panel reads `WebRTC no` there); the
+ *    Linux build has the API but nothing here has ever put it through a real
+ *    peer connection, so it stays out rather than entering the run on the
+ *    strength of an API existing. One WebKit build cannot cover both platforms
+ *    anyway - see the capability table in `tests/e2e/debug-panel.spec.ts`.
  * 2. `offline` navigates while the network is emulated down, and that makes
  *    WebKit fail the navigation with an internal error rather than serving it.
  *    Service workers themselves work there - the app installs, claims and caches

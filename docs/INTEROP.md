@@ -13,7 +13,7 @@ Codec used per browser pair, plus notes. `DB1` = minimal descriptor (PRD
 | Chromium ↔ Chromium (peer disconnect)                                                             | same pair, host device removed                              | —     | guest reaches `PEER_LOST` with no console errors                 | 2026-10-10 |
 | Chromium ↔ Chromium (OPFS save path)                                                              | guest without File System Access                            | —     | file staged and saved (PRD 8.5 Firefox/Safari sink)              | 2026-10-10 |
 | Firefox ↔ Firefox (two browser contexts)                                                          | the nightly's second engine, same suite                     | DB1   | pass (19/19 on Windows; the nightly runs it on Linux)            | 2026-10-15 |
-| WebKit, whole suite minus the pairing and offline specs                                           | `npm run test:webkit`, scheduled job                        | —     | 22/22, real absence of WebRTC and real capability rows           | 2026-10-18 |
+| WebKit, whole suite minus the pairing and offline specs                                           | `npm run test:webkit`, scheduled and dispatched leg          | —     | 22/22 on Windows and on Linux, real capability rows per platform  | 2026-10-19 |
 | Chromium ↔ Firefox (two engines)                                                                  | real WebRTC, DB1 code pasted                                | DB1   | pass (`scripts/interop-matrix.mjs`)                              | 2026-10-10 |
 | Firefox ↔ Chromium (two engines)                                                                  | real WebRTC, DB1 code pasted                                | DB1   | pass (`scripts/interop-matrix.mjs`)                              | 2026-10-10 |
 | Chromium settings sheet (theme, hi, reduce motion, wake lock, STUN, persistence, Devanagari face) | —                                                           | —     | pass (`tests/e2e/settings.spec.ts`)                              | 2026-10-10 |
@@ -102,22 +102,45 @@ category (50), which is about AI crawlers discovering the site and is not
 a DoD requirement for a page that only talks to its paired peer.
 
 The WebKit rows of the manual matrix **cannot be paired here**: Playwright's
-WebKit build for Windows ships without `RTCPeerConnection`, and the Linux
-build has WebRTC disabled too — WebKitGTK's `enable-webrtc` setting defaults
-to false — so no pairing is possible on either platform. That is why the
-pairing spec is excluded from WebKit's project (`playwright.config.ts`) rather
-than skipped inside the spec, and why a WebKit leg would fail the gate's own
-figure check: it collects a smaller suite than `README.md` describes. So it runs
-off the gate, as `npm run test:webkit` on a scheduled job, and
-`scripts/gate-figures.mjs` refuses `E2E_BROWSERS=webkit` by name.
+WebKit build for Windows ships without `RTCPeerConnection` outright, and nothing
+in this repository has ever put the Linux build's through a real peer connection.
+That is why the pairing spec is excluded from WebKit's project
+(`playwright.config.ts`) rather than skipped inside the spec, and why a WebKit leg
+would fail the gate's own figure check: it collects a smaller suite than
+`README.md` describes. So it runs off the gate, as `npm run test:webkit` on a
+scheduled or dispatched job, and `scripts/gate-figures.mjs` refuses
+`E2E_BROWSERS=webkit` by name.
+
+> **The two WebKit builds are not the same browser, and the first thing that
+> proves it is WebRTC.** Measured through the debug panel, on the Windows build
+> and on the Linux runner:
+>
+> | row | Windows | Linux |
+> |---|---|---|
+> | WebRTC | `no` | `yes` |
+> | File System Access | `no` | `no` |
+> | OPFS | `yes` | `yes` |
+> | Save sink | `opfs` | `opfs` |
+>
+> So the earlier claim that WebKit cannot pair on either platform was half
+> right: the API is simply absent on one of them. Everything else the two builds
+> report today is identical, and that is a measurement, not a promise — which is
+> why the capability table in `tests/e2e/debug-panel.spec.ts` is keyed by
+> platform for WebKit rather than by engine, and why the Windows row cannot
+> stand for the Linux one.
+>
+> The Linux column is from the CI WebKit leg (run `39239882157`, 2026-10-19), read
+> out of a run whose expected values were deliberately wrong so that every row
+> reported its real value in one pass. Nothing here is inferred from the Windows
+> column.
 
 Everything else in the suite **does** run on WebKit, and it is the only engine
-where the degradation path is exercised for real: no `RTCPeerConnection` is
-injected or removed, so the unsupported-browser messaging, the self-test's
-`unsupported` stage, the settings sheet and the debug panel meet the genuine
-absence of the API. On Chromium and Firefox the same spec runs too, with the API
-removed by an init script, so the pull-request legs cover the behaviour without
-WebKit. That arrangement produced three findings worth recording:
+where the degradation path is exercised for real: the API is removed the same way
+on every engine (`tests/e2e/degradation.spec.ts`), so the unsupported-browser
+messaging, the self-test's `unsupported` stage, the settings sheet and the debug
+panel all meet the absence the app has to survive. On Chromium and Firefox the
+same spec runs too, so the pull-request legs cover the behaviour without WebKit.
+That arrangement produced three findings worth recording:
 
 - **The sink WebKit resolves to is OPFS.** No `showSaveFilePicker`, but
   `navigator.storage.getDirectory` is there, so `chooseSink()` (PRD 8.5) picks
@@ -146,9 +169,11 @@ WebKit. That arrangement produced three findings worth recording:
   Both halves are now visible on the device itself: the debug panel (FR-50)
   reports reachability and writability as separate rows next to the sink
   `chooseSink()` would take, so a field report from a real phone can show a
-  browser staging onto a path it cannot write. Measured through the panel on this
-  WebKit build: `OPFS yes / OPFS write fails / Save sink opfs`, with no page
-  errors.
+  browser staging onto a path it cannot write. Measured through the panel on the
+  Windows build: `OPFS yes / OPFS write fails / Save sink opfs`, with no page
+  errors. The Linux runner is not covered by that measurement — the spec only
+  pins that the row answered, not how — so the two builds are recorded apart
+  rather than merged.
 
 One earlier finding from this same gap is already fixed and covered by a unit
 test: the app used to answer "Join" in a browser without WebRTC with a

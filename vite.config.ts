@@ -66,6 +66,13 @@ export default defineConfig({
   },
   test: {
     environment: "node",
+    // The component files opt into jsdom per-file. Without a frame clock,
+    // preact/hooks flushes effects on a one-second debounce, so an effect can
+    // still be pending when a fast test file ends and jsdom is torn down under
+    // it -- an unhandled ReferenceError that fails the gate on the runner and
+    // nowhere else. pretendToBeVisual gives jsdom requestAnimationFrame, which
+    // is what a browser has and what preact prefers (see vitest.setup.ts).
+    environmentOptions: { jsdom: { pretendToBeVisual: true } },
     include: ["tests/unit/**/*.test.{ts,tsx}", "tests/integration/**/*.test.{ts,tsx}"],
     exclude: ["tests/e2e/**"],
     setupFiles: ["vitest.setup.ts"],

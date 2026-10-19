@@ -1,5 +1,20 @@
 // Shared test setup. Node 20+ provides WebCrypto, CompressionStream and
 // ReadableStream globally, which core/ relies on (FR-17, 8.2.1, 8.4).
+import { afterEach } from "vitest";
+
+// A frame clock for jsdom, so preact flushes effects on a frame instead of on a
+// timer, plus one drain before each jsdom file's environment closes. Without
+// both, a component rendered by a fast test can still have a pending effect when
+// the file ends, and the late timer throws into a torn-down environment instead
+// of failing the test that caused it. Only registered for the component files --
+// the node-environment tests have no window and no effects to drain.
+if (typeof window !== "undefined") {
+  afterEach(async () => {
+    // A frame is ~16ms here; wait past it plus a macrotask, so anything preact
+    // queued has run while the document is still alive.
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  });
+}
 
 // jsdom (used per-file via `// @vitest-environment jsdom`) lacks a few APIs the
 // UI touches; provide minimal stand-ins so component tests can run.

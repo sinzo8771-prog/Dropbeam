@@ -1525,5 +1525,101 @@ encountered an internal error` on `page.reload()` and `page.goto()` while the
 
 - **Verified:** `npm run ci` green. The job's condition, the trigger, and the
   WebKit job's absence from the `gate` list are all pinned by `ci-parity.test.ts`;
-  the WebKit leg itself was then dispatched by hand against this commit and
-  passed, which is the first time that job has ever run in CI.
+  the WebKit leg itself was then dispatched by hand against this commit, which is
+  the first time that job has ever run in CI — and it went red, for a reason of
+  its own: the capability table still carried the Windows answer. Corrected
+  under the entry below, which is what the dispatch was actually for.
+
+## 2026-10-19 · WebKit's capability rows are keyed by platform, not by engine
+
+- **Problem:** the debug panel's four capability rows (FR-50) were one row per
+  engine, so `webkit` had a single set of expected values. Those were read on a
+  Windows machine. When the WebKit leg ran in CI for the first time, on Ubuntu,
+  the WebRTC row failed: the app reported `yes` where the table said `no`. The
+  same row failed the scheduled leg too, which fired on 2026-10-19 at 09:01 UTC.
+  Nothing in the repository had ever run WebKit on Linux, so the table was not
+  wrong by accident — it was a measurement of one platform wearing another's
+  name.
+
+- **Alternatives considered:**
+  - Change the WebKit row to the Linux values. Rejected: the Windows leg runs
+    locally on every `npm run test:webkit`, so that would have broken the one
+    place these values can be checked, and silently swapped which platform the
+    published numbers describe.
+  - Split the row per platform but keep hard assertions and let CI report one
+    drifted row per run. Rejected as a way of finding out: four runs to read
+    four values, each of them a red main branch.
+  - Guess the remaining three rows from the app's own feature detection. That is
+    the one option this project takes nowhere: a capability row is evidence, not
+    an inference, and a guess that happens to be right costs more than a wrong
+    guess ever would.
+
+- **Choice:** key WebKit's rows by `process.platform` and leave the other engines
+  keyed by engine. The Linux row was then read out of a real run: a short-lived
+  `diag/webkit-caps` branch pointed the Linux values at `?` and made the four
+  assertions `expect.soft`, so one dispatched run reported every row's real value
+  instead of only the first failure. `win32` keeps the values already measured
+  here; `darwin` stays `?`, because guessing for a platform that has never run
+  anything would be the same mistake one level down.
+
+- **Reason:** the table's job is to state what a browser can do, and a browser's
+  answer depends on the build, not on its name. Keying by platform makes that
+  dependence visible instead of hiding it behind a row that was only ever true
+  of the machine it was measured on. The `?` rows keep the honesty the rest of
+  the suite has: an unmeasured platform fails loudly rather than passing on
+  somebody else's numbers.
+
+- **Cost and limits:** a WebKit run on macOS now fails the capability spec until
+  somebody measures it, which is intended — that failure is the report. The diag
+  branch cost one deliberate red run on its own branch and is deleted; nothing in
+  `main`'s history records a wrong value.
+
+- **Verified:** CI run `39239882157` reported `WebRTC yes / File System Access no
+  / OPFS yes / Save sink opfs` on Linux, against `no / no / yes / opfs` on
+  Windows; `npm run test:webkit` still passes 22 locally. This entry also
+  corrects three places that had recorded the Linux build as having no WebRTC at
+  all — `playwright.config.ts`, `docs/INTEROP.md`, `docs/TESTING.md` — and the
+  entry above, which reported that first dispatch as a pass when it went red on
+  this row.
+
+## 2026-10-19 · jsdom gets a frame clock, so a pending effect cannot outlive a test
+
+- **Problem:** the first gate run after the capability fix failed with
+  `ReferenceError: window is not defined` from `src/ui/App.tsx`, thrown from a
+  timer after a test file had already ended. All 356 tests passed; Vitest counts
+  the unhandled error and exits 1, so the gate went red. The cause is
+  `preact/hooks`: with no `requestAnimationFrame` it flushes effects on a
+  one-second debounce, so on a runner quick enough to finish a component test in
+  under a second the effect was still queued when jsdom was torn down under it.
+  It passed everywhere slower — the worst possible failure shape, and the reason
+  it survived until the first run on CI hardware.
+
+- **Alternatives considered:**
+  - Guard the effect with `typeof window === "undefined"`. Rejected: that hides a
+    real unmount from the tests instead of fixing the timing, and it would ship
+    in production code to satisfy a harness.
+  - Add `unmount()` to every affected test. Rejected: the race is in which timer
+    wins, not in what any one test does, and seven component files would each
+    need the same new line.
+  - Slow the runner or the tests. Rejected for the same reason as any other
+    workaround: it makes the next real regression harder to see, not easier.
+
+- **Choice:** give jsdom `pretendToBeVisual`, so `requestAnimationFrame` exists
+  and preact flushes on a frame like a browser, and drain one frame at the end of
+  every jsdom test in `vitest.setup.ts`. The frame clock is pinned by
+  `tests/unit/test-env.test.ts`, which asserts the API exists and actually
+  advances — the assertion is the thing that failed before, so it is the thing
+  worth keeping.
+
+- **Reason:** the tests were asserting against a browser model jsdom did not
+  have, and the gap only showed up as an unhandled error with no test attached
+  to it. Making the environment match what the code runs against is the fix that
+  does not need a human to remember next time.
+
+- **Cost and limits:** about 25 ms per jsdom test, paid by seven files. The drain
+  is registered only where there is a window, so the node-environment unit and
+  integration tests are untouched. It does not make unrelated timing bugs
+  impossible; it makes this one impossible to miss.
+
+- **Verified:** `npm run ci` green locally (358 unit/integration, 28 e2e) and the
+  gate run on the runner that produced the failure passes.

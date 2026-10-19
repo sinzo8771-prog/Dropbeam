@@ -14,14 +14,15 @@ import { engineList, projectsFor } from "../../playwright.config";
  * figures it checks, because each leg drives exactly one engine.
  *
  * WebKit is the exception that proves that rule, and the reason it is scoped
- * rather than refused. It cannot run the pairing spec - Playwright's WebKit build
- * ships without `RTCPeerConnection` - and it cannot navigate while the network is
- * emulated down, which is what the offline spec needs. So it collects fewer tests
- * than the README states. Rather than start a run that would fail for a cause
- * nobody here can fix (the old behaviour) or quietly test Chromium under WebKit's
- * name, its project excludes those two specs and is kept off the gate: the
- * scheduled job runs `npm run test:webkit`, and `scripts/gate-figures.mjs` refuses
- * a WebKit gate run outright.
+ * rather than refused. It cannot run the pairing spec - the Windows build has no
+ * `RTCPeerConnection` at all and the Linux build's has never been put through a
+ * real peer connection - and it cannot navigate while the network is emulated
+ * down, which is what the offline spec needs. So it collects fewer tests than the
+ * README states. Rather than start a run that would fail for a cause nobody here
+ * can fix (the old behaviour) or quietly test Chromium under WebKit's name, its
+ * project excludes those two specs and is kept off the gate: the scheduled and
+ * dispatched jobs run `npm run test:webkit`, and `scripts/gate-figures.mjs`
+ * refuses a WebKit gate run outright.
  *
  * What is pinned below is the shape of that arrangement: the excluded specs are
  * named explicitly and self-update as specs are added, the default and the nightly
@@ -100,7 +101,7 @@ describe("e2e engine selection", () => {
       // Cannot navigate with the network emulated down. Service workers work on
       // this engine; navigating offline does not, which is what DoD 6 needs.
       "offline.spec.ts",
-      // No RTCPeerConnection on either WebKit build, so it cannot pair.
+      // Never paired on either build: absent on Windows, unproven on Linux.
       "pairing-transfer.spec.ts",
     ]);
   });

@@ -3,12 +3,13 @@ import { expect, test, type Page } from "@playwright/test";
 /**
  * The browser that cannot do direct transfers (PRD 7.1, FR-62, 8.5).
  *
- * Playwright's WebKit build ships without `RTCPeerConnection`, so on that engine
- * this suite runs against the genuine absence of the API: the exact messaging a
- * real user sees in a browser that cannot transfer, with nothing stubbed. On
- * Chromium and Firefox the same API is removed by an init script, so the app's
- * degradation wiring is also exercised on the pull-request legs, where WebKit is
- * not run at all.
+ * The API the app feature-detects on is removed by an init script on every
+ * engine, so this suite runs against the same genuine absence everywhere: the
+ * exact messaging a real user sees in a browser that cannot transfer, with one
+ * code path rather than an engine branch. On the WebKit leg that matters twice
+ * over, because the Windows build has no `RTCPeerConnection` of its own (measured
+ * in the debug panel) while the Linux build does — so a spec that relied on the
+ * build's own absence would quietly stop testing anything on one of them.
  *
  * What is asserted here is every place a missing capability has to surface: both
  * home-screen entry points ("Start" and "Join") and the shared `#j=` link route,
@@ -26,10 +27,10 @@ import { expect, test, type Page } from "@playwright/test";
 /**
  * Remove the API the app feature-detects on, before any app code runs.
  *
- * On WebKit it is already absent, so this only defines it as `undefined` — which
- * is not a function either way. That keeps the spec one code path on every
- * engine rather than an engine branch, and the assertions below describe the
- * same behaviour whether the absence is real or injected.
+ * Defining it as `undefined` removes the feature without changing what the
+ * detection sees, and it keeps the spec one code path on every engine rather than
+ * an engine branch, so the assertions below describe the same behaviour whether
+ * the absence is real or injected.
  */
 async function withoutWebRtc(page: Page): Promise<void> {
   await page.addInitScript(() => {

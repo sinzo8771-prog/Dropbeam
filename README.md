@@ -55,7 +55,7 @@ Chromium — `E2E_BROWSERS=firefox` for the second engine), `npm run test:webkit
 `npm run size` (gzip budget), `npm run pwa:health` (installability probe),
 `npm run audit:release` (Lighthouse + same-origin network audit).
 
-Current gate: 384 tests green (356 unit/integration + 28 e2e), initial JS
+Current gate: 386 tests green (358 unit/integration + 28 e2e), initial JS
 ~137.0 KB gz against a 153.6 KB budget, Lighthouse mobile **99 / 100 / 100 /
 100** (Performance / Accessibility / Best practices / SEO), and a network audit
 over a real pairing + transfer showing only same-origin requests. Both of those
@@ -72,9 +72,10 @@ The same gate runs in CI: on pushes and pull requests, and nightly on a
 schedule, since the Linux runner is an environment no local run can prove. The
 nightly runs it more than once — the other Node line, and Firefox beside
 Chromium — while a pull request keeps the single fast leg. A third, scheduled
-job runs the WebKit leg instead of the gate, because Playwright's WebKit build
-has no WebRTC: it drives everything except pairing, against a real absence of
-the API rather than a stubbed one.
+job runs the WebKit leg instead of the gate: it drives everything except
+pairing, which no WebKit build here has ever done, and reports the browser's own
+capabilities per platform — the two builds disagree, which is why that table is
+keyed by platform rather than by engine.
 
 ## Using it
 
@@ -101,7 +102,7 @@ the hotspot trick and the browser support table.
 
 `v1.0`. Milestones M0–M8 are complete and gated by `npm run ci`: pairing,
 verification, approval, two-way transfers, the settings sheet, the PWA
-shell, and the release audit are all covered by 356 unit/integration and
+shell, and the release audit are all covered by 358 unit/integration and
 28 e2e tests, plus the documented manual matrix.
 
 The automated half of the [interop matrix](docs/INTEROP.md) runs **real
@@ -109,9 +110,9 @@ engines** — Chromium ↔ Chromium, Chromium ↔ Firefox in both directions,
 with real WebRTC over the paste route, plus WebKit on everything that does
 not need a peer. What is deliberately _not_ automated, and is listed there
 as field QA: the camera QR route, real Wi-Fi / hotspot / guest-network
-behaviour, real Safari and iOS (Playwright's WebKit build has no WebRTC, so
-its OPFS save path is measured as blocked — see the matrix), and mobile
-power/screen behaviour.
+behaviour, real Safari and iOS (no WebKit build here has ever paired, and the
+Windows one's OPFS save path is measured as blocked — see the matrix), and
+mobile power/screen behaviour.
 
 The demo animation above is recorded by `node scripts/record-demo.mjs`;
 `node scripts/interop-matrix.mjs` re-runs the cross-engine rows and
