@@ -1,6 +1,7 @@
 import { useRef } from "preact/hooks";
 import type { FilePhase } from "../../core/transfer/phase";
 import type { StringKey, Translate } from "../../core/platform/i18n";
+import { formatBytes, formatDuration, formatRate, RateMeter } from "../format";
 
 /**
  * Per-file transfer row (PRD 10.1 screen 6): name, size, progress bar, speed,
@@ -8,10 +9,9 @@ import type { StringKey, Translate } from "../../core/platform/i18n";
  *
  * The speed and the ETA are measured here rather than carried in the session's
  * progress report, because both are *rates*: they only mean anything over an
- * interval, and the row is the thing that sees every sample. The rate is a
- * smoothed one - a single tick's worth of bytes divided by a single tick's
- * worth of time is noisy enough to make the number jump, and a number that
- * jumps is worse than no number.
+ * interval, and the row is the thing that sees every sample. The rate is the
+ * rolling two-second average FR-15 asks for, so one slow packet cannot reset
+ * the number and one fast one cannot spike it.
  */
 
 export type ProgressRowProps = {
@@ -37,33 +37,7 @@ const PHASE_LABEL_KEY: Record<FilePhase, StringKey> = {
   CANCELED: "transfer.phase.canceled",
 };
 
-export function formatBytes(bytes: number): string {
-  if (!Number.isFinite(bytes) || bytes < 0) return "—";
-  if (bytes < 1024) return `${bytes} B`;
-  const units = ["KB", "MB", "GB", "TB"];
-  let value = bytes / 1024;
-  let unit = 0;
-  while (value >= 1024 && unit < units.length - 1) {
-    value /= 1024;
-    unit++;
-  }
-  return `${value < 10 ? value.toFixed(1) : Math.round(value)} ${units[unit]}`;
-}
-
-/** A rate, in bytes per second, shown the way a size is. */
-export function formatRate(bytesPerSecond: number): string {
-  if (!Number.isFinite(bytesPerSecond) || bytesPerSecond <= 0) return "—";
-  return `${formatBytes(bytesPerSecond)}/s`;
-}
-
-/** A duration, in the largest unit that still reads well. */
-export function formatDuration(seconds: number): string {
-  if (!Number.isFinite(seconds) || seconds < 0) return "—";
-  if (seconds < 60) return `${Math.ceil(seconds)} s`;
-  const minutes = Math.ceil(seconds / 60);
-  if (minutes < 60) return `${minutes} m`;
-  return `${Math.floor(minutes / 60)} h ${minutes % 60} m`;
-}
+export { formatBytes, formatDuration, formatRate };
 
 export function ProgressRow({
   t,
@@ -75,31 +49,17 @@ export function ProgressRow({
   cancelLabel,
   onCancel,
 }: ProgressRowProps) {
-  // The last sample, and the smoothed rate so far. A ref, because a sample is
-  // not state: the row re-renders on every progress tick, and the rate is
-  // derived from the ticks it has already seen.
-  const last = useRef<{ at: number; sent: number } | null>(null);
-  const rate = useRef(0);
-
-  const now = Date.now();
-  const previous = last.current;
-  if (previous && sent > previous.sent) {
-    const elapsed = (now - previous.at) / 1000;
-    if (elapsed > 0) {
-      const instant = (sent - previous.sent) / elapsed;
-      // Smooth towards the new sample rather than replacing it: one slow tick
-      // should not reset the number, and one fast tick should not spike it.
-      rate.current = rate.current === 0 ? instant : rate.current * 0.6 + instant * 0.4;
-    }
-  }
-  last.current = { at: now, sent };
+  // The samples the rate is measured from. A ref, because a sample is not
+  // state: the row re-renders on every progress tick.
+  const meter = useRef(new RateMeter());
+  const rate = meter.current.update(Date.now(), sent);
 
   const pct = total > 0 ? Math.min(100, Math.round((sent / total) * 100)) : 0;
   const running = phase === "TRANSFERRING";
   // Scale, not width: animating width forces layout on every progress tick.
   const ratio = total > 0 ? Math.min(1, sent / total) : 0;
   const remaining = Math.max(0, total - sent);
-  const showRate = running && rate.current > 0;
+  const showRate = running && rate > 0;
   const showEta = showRate && remaining > 0;
 
   return (
@@ -125,12 +85,12 @@ export function ProgressRow({
         {running ? <span class="row-pct">{pct}%</span> : null}
         {showRate ? (
           <span class="row-rate" data-testid="row-rate">
-            {t("transfer.speed", { value: formatRate(rate.current) })}
+            {t("transfer.speed", { value: formatRate(rate) })}
           </span>
         ) : null}
         {showEta ? (
           <span class="row-eta" data-testid="row-eta">
-            {t("transfer.eta", { value: formatDuration(remaining / rate.current) })}
+            {t("transfer.eta", { value: formatDuration(remaining / rate) })}
           </span>
         ) : null}
         {onCancel && phase !== "DONE" && phase !== "FAILED" ? (

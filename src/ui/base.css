@@ -674,6 +674,19 @@ dialog.sheet {
   color: var(--ink-muted);
 }
 
+/* The totals line: the same parts as a file row, one line above them. */
+.rows-total {
+  display: flex;
+  align-items: baseline;
+  gap: var(--s-3);
+  padding: var(--s-2) 0;
+  border-bottom: 1px solid var(--hairline);
+}
+
+.rows-total .row-size {
+  margin-left: auto;
+}
+
 .row-bar {
   height: 4px;
   background: var(--hairline);

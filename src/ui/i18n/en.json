@@ -90,6 +90,7 @@
   "action.decline": "Decline",
   "action.accept": "Accept",
   "action.save": "Save",
+  "action.open": "Open",
 
   "update.available": "New version available.",
   "update.reload": "Reload",
@@ -154,6 +155,8 @@
   "transfer.speed": "{value}/s",
   "transfer.eta": "{value} left",
   "transfer.etaUnknown": "estimating…",
+  "transfer.total": "Total",
+  "transfer.lockWarning": "If this device locks its screen, the transfer may pause. Keep the screen awake.",
   "transfer.phase.queued": "Queued",
   "transfer.phase.offered": "Waiting for approval",
   "transfer.phase.accepted": "Accepted",

@@ -1943,3 +1943,43 @@ encountered an internal error` on `page.reload()` and `page.goto()` while the
   speed and the ETA appearing once there is a rate, and their absence when
   the transfer is not running; the two catalogs stay in parity. `npm run test`
   is 408 green.
+
+## 2026-10-19 · Three transfer-screen requirements were listed and not built
+
+- **Problem:** PRD §10.1 screen 6 asks for transfer rows with "icon, name,
+  size, progress bar, speed, ETA and cancel", plus "totals"; FR-15 asks for
+  progress "per file and total" with a "rolling 2 s average" speed; FR-20 asks
+  for "Save, **Open** (images/PDF/video preview where cheap), Copy path (n/a)
+  and 'Send back'" after completion; FR-19 asks for a warning that locking the
+  screen may pause the transfer. What the app had: the rows, without a total,
+  without a speed or an ETA, a saved row that only named the file, and no
+  warning. `SaveResult.url` existed and was never used.
+
+- **Choice:** build the three that can be built honestly. A **totals** line
+  over the files that are moving, with the same parts as a row. A **speed and
+  ETA** measured as FR-15 words it - a rolling two-second average, kept in a
+  small `RateMeter` shared by the rows and the totals. An **Open** action on a
+  saved file, offered only when the sink kept the bytes and therefore has a URL
+  to open; a file that streamed to disk has nothing to open, and offering a
+  broken action would be worse than not offering one. And the **screen-lock
+  warning**, in the transfer screen rather than the settings sheet, because that
+  is where the transfer is.
+
+- **Reason:** the PRD's list is a contract, and three of its items were simply
+  absent while the screen looked finished. "Send back" is the one that is not
+  built, and the reason is the privacy model: the app does not keep a received
+  file's bytes, so sending it back would mean reading them back out of the
+  sink, which only the OPFS sink can do. That is a design decision rather than
+  a missing line, so it is recorded here rather than quietly dropped.
+
+- **Cost and limits:** the per-file icon §10.1 lists is still not there - the
+  row leads with the file's name, and per-type artwork is a design decision
+  rather than a missing line, so it is open for the same reason. The speed and
+  the ETA are estimates from the samples seen so far: a transfer that has not
+  moved yet shows neither, and the ETA is as good as the rate behind it.
+
+- **Verified:** `tests/unit/transfer-ui.test.tsx` covers the totals (750 of
+  2000 bytes, 38%), the Open action appearing only for a sink with a URL, and
+  the warning appearing only while something is moving;
+  `tests/unit/ui.test.tsx` covers the rolling rate and the phase labels.
+  `npm run test` is 412 green.

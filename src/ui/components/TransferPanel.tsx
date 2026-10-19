@@ -1,5 +1,6 @@
 import { useRef, useState } from "preact/hooks";
 import { ProgressRow } from "./ProgressRow";
+import { formatBytes, formatDuration, formatRate, RateMeter } from "../format";
 import type { FileProgress } from "../../core/transfer/transfer-session";
 import type { IncomingText } from "../../core/transfer/receiver";
 import type { SaveResult } from "../../core/storage/sink";
@@ -40,6 +41,19 @@ export function TransferPanel({
   // to send — the user still presses Send, since text is never auto-sent.
   const [note, setNote] = useState(initialNote ?? "");
   const [dragging, setDragging] = useState(false);
+  // The totals' rate, measured the same way as each row's (FR-15: a rolling
+  // two-second average over the bytes sent so far).
+  const meter = useRef(new RateMeter());
+
+  // PRD 10.1 screen 6: progress "per file and total". The total is over the
+  // files that are moving, in both directions.
+  const totalSize = files.reduce((sum, file) => sum + file.size, 0);
+  const totalDone = files.reduce((sum, file) => sum + file.done, 0);
+  const totalPct = totalSize > 0 ? Math.min(100, Math.round((totalDone / totalSize) * 100)) : 0;
+  const totalRate = meter.current.update(Date.now(), totalDone);
+  const totalRemaining = Math.max(0, totalSize - totalDone);
+  const showTotals = files.length > 0 && totalSize > 0;
+  const showTotalEta = totalRate > 0 && totalRemaining > 0;
 
   const send = (picked: FileList | null): void => {
     if (!picked || picked.length === 0) return;
@@ -92,6 +106,24 @@ export function TransferPanel({
         </button>
       </div>
 
+      {showTotals ? (
+        <div class="rows-total" data-testid="rows-total">
+          <span class="row-phase">{t("transfer.total")}</span>
+          <span class="row-size">
+            {formatBytes(totalDone)} / {formatBytes(totalSize)}
+          </span>
+          <span class="row-pct">{totalPct}%</span>
+          {totalRate > 0 ? (
+            <span class="row-rate">{t("transfer.speed", { value: formatRate(totalRate) })}</span>
+          ) : null}
+          {showTotalEta ? (
+            <span class="row-eta">
+              {t("transfer.eta", { value: formatDuration(totalRemaining / totalRate) })}
+            </span>
+          ) : null}
+        </div>
+      ) : null}
+
       {files.length > 0 ? (
         <ul class="rows">
           {files.map((file) => (
@@ -120,6 +152,22 @@ export function TransferPanel({
                 <span class="row-name">{result.name}</span>
                 <span class="row-size">{t("transfer.saved")}</span>
               </div>
+              {/* FR-20: after a file is saved, the obvious next thing is to
+                  open it. A sink that kept the bytes gives a URL to open;
+                  one that streamed them to disk does not, so the action is
+                  simply not offered rather than offered and broken. */}
+              {result.url ? (
+                <div class="row-foot">
+                  <a
+                    class="btn btn-quiet"
+                    href={result.url}
+                    download={result.name}
+                    data-testid="saved-open"
+                  >
+                    {t("action.open")}
+                  </a>
+                </div>
+              ) : null}
             </li>
           ))}
         </ul>
@@ -167,6 +215,11 @@ export function TransferPanel({
           ))}
         </ul>
       ) : null}
+
+      {/* FR-19: a phone that locks its screen may pause the transfer, and the
+          user is the one who can prevent it. The warning is here rather than
+          in the settings sheet because this is where the transfer is. */}
+      {files.length > 0 ? <p class="hint">{t("transfer.lockWarning")}</p> : null}
     </section>
   );
 }

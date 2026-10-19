@@ -119,6 +119,59 @@ describe("TransferPanel (PRD 10.1 screen 6)", () => {
     expect(row.textContent).toContain("receipt.pdf");
     expect(row.textContent).toContain("Saved");
   });
+
+  it("offers to open a saved file that kept its bytes, and not one that did not", () => {
+    // FR-20: after a file is saved, the obvious next thing is to open it. A
+    // sink that streamed the bytes to disk has no URL to open, so the action
+    // is not offered rather than offered and broken.
+    const withUrl: SaveResult[] = [
+      { name: "photo.png", size: 12, sink: "memory", url: "blob:fake" },
+    ];
+    const { unmount } = render(
+      <TransferPanel t={t} files={[]} saved={withUrl} notes={[]} {...noop} />,
+    );
+    const open = screen.getByTestId("saved-open");
+    expect(open.getAttribute("href")).toBe("blob:fake");
+    unmount();
+
+    render(
+      <TransferPanel
+        t={t}
+        files={[]}
+        saved={[{ name: "photo.png", size: 12, sink: "opfs" }]}
+        notes={[]}
+        {...noop}
+      />,
+    );
+    expect(screen.queryByTestId("saved-open")).toBeNull();
+  });
+
+  it("shows a total over the files that are moving (FR-15)", () => {
+    const files: FileProgress[] = [
+      { fid: 1, name: "a.bin", size: 1000, phase: "TRANSFERRING", done: 500 },
+      { fid: 2, name: "b.bin", size: 1000, phase: "TRANSFERRING", done: 250 },
+    ];
+    render(<TransferPanel t={t} files={files} saved={[]} notes={[]} {...noop} />);
+    const total = screen.getByTestId("rows-total");
+    expect(total.textContent).toContain("Total");
+    // 750 of 2000 bytes, so 38%.
+    expect(total.textContent).toContain("750 B");
+    expect(total.textContent).toContain("2.0 KB");
+    expect(total.textContent).toContain("38%");
+  });
+
+  it("warns that a locked screen may pause the transfer (FR-19)", () => {
+    const files: FileProgress[] = [
+      { fid: 1, name: "a.bin", size: 1000, phase: "TRANSFERRING", done: 0 },
+    ];
+    render(<TransferPanel t={t} files={files} saved={[]} notes={[]} {...noop} />);
+    expect(screen.getByText(/locks its screen/)).toBeTruthy();
+  });
+
+  it("does not warn when nothing is moving", () => {
+    render(<TransferPanel t={t} files={[]} saved={[]} notes={[]} {...noop} />);
+    expect(screen.queryByText(/locks its screen/)).toBeNull();
+  });
 });
 
 /** A tiny host component so the hook can be exercised the way the app uses it. */
