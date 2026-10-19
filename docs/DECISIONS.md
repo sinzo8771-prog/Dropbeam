@@ -1627,53 +1627,77 @@ encountered an internal error` on `page.reload()` and `page.goto()` while the
   and the first automatic run (2026-10-19 03:17 UTC, `39227011502`) failed the
   WebKit leg — confirming the manual-dispatch observation was real.
 
-## 2026-10-19 · Firefox pairing fails on Linux CI; the gap is not time or load
+## 2026-10-19 · Firefox cannot gather ICE in the runner; the app is not at fault
 
 - **Problem:** `tests/e2e/pairing-transfer.spec.ts` passes 28/28 on Chromium
-  (Linux) and 28/28 on Firefox (Windows, local), but fails 2/3 on Firefox
-  (Linux, hosted `ubuntu-latest`) with `ICE_GATHER_TIMEOUT` mapped from
-  `WebRTC: ICE failed, add a STUN server`. The only failing steps are the pairing
-  spec's online-hosting (`:111`) and online-connection-drop (`:273`) paths; the
-  offline pairing (`:185`) passes. The `diag-ice.mjs` probes (ten cold
-  connections to the app origin; four parallel browsers; bare `RTCPeerConnection`
-  against `http://localhost:4199/` and `http://10.1.0.114:4199/`; with and
-  without `media.peerconnection.ice.obfuscate_host_addresses` false) all gather
-  1-2 host candidates in 1-70 ms with `state: complete`, so the failure is not
-  missing multicast or a gather budget issue: Firefox *can* gather quickly in
-  every tested arrangement.
+  (Linux) and 28/28 on Firefox (Windows, local), but on Firefox (Linux, hosted
+  `ubuntu-latest`) the two specs that pair over a live network fail - `:112`
+  "pairs two browsers, matches words, and exchanges a file and a note" and
+  `:277` "the guest sees the connection drop when the host disappears" - with
+  the app's own `ICE_GATHER_TIMEOUT` ("Couldn't find a network path. Check
+  Wi-Fi."). The trace shows why: the app's peer connection goes
+  `iceConnectionState: failed` immediately, **zero** `icecandidate` events, and
+  `iceGatheringState: new` - the engine never started gathering. The offline
+  spec (`:189`, DoD 6) passes, because it pairs with the network cut.
 
-- **Choice:** document the gap rather than changing the pairing spec or the
-  product's 3-second gather budget. The manual matrix (`docs/INTEROP.md`) and
-  `README.md` stay precise: the automated half passes; the hardware half (real
-  Safari/iOS, real camera QR, real Wi-Fi/hotspot, real mobile power/screen) is
-  what M8 is gated on. `playwright.config.ts` keeps `E2E_BROWSERS=firefox` out of
-  the default gate (no wider `workflow_dispatch`); the `diag/ff-trace` runs are
-  retained only in session notes, not on `main`'s history.
+- **Choice:** record the gap rather than change the app or the spec. The
+  product is not at fault - the *same* app code produces a correct offer
+  wherever the engine cooperates (the app's own `PeerSession.createOffer()`
+  succeeds against the same origin in the same run, and the same gather
+  succeeds in a plain Node process on the same machine, in about thirty
+  milliseconds). Nothing in the app is changed to make a harness behave.
 
-- **Reason:** changing `GATHER_TIMEOUT_MS` (currently 3 s) to cover a Firefox
-  runner quirk would change the app's honest fast-fail contract for every browser,
-  turning a real user-visible failure on a bad network into a hidden delay; and
-  hiding the pairing spec failure (adding retries, injecting STUN) would turn a
-  real interop limitation into an invisible gap. Not knowing is acceptable; making
-  it disappear by changing the measurement is not.
+- **Reason:** the earlier version of this entry blamed the app's three-second
+  gather budget and the missing multicast, and both were wrong. The budget is
+  not the constraint - the engine fails *before* gathering starts, so waiting
+  longer cannot help, and a document that has failed once never recovers
+  (measured: the same document, ten seconds later, still `state: new`). The
+  multicast is not the constraint either: with
+  `media.peerconnection.ice.obfuscate_host_addresses` off, the engine still
+  fails, and the candidates it does gather elsewhere are plain addresses.
+  Changing `GATHER_TIMEOUT_MS` to cover a runner quirk would have made every
+  browser's honest fast-fail into a hidden delay, and injecting STUN or
+  retries into the spec would have turned a real limitation into an invisible
+  gap. Not knowing is acceptable; making it disappear by changing the
+  measurement is not.
+
+- **What was ruled out, by measurement:** the shipped CSP (`connect-src 'self'`
+  - removing the header made one probe pass, and a policy matrix showed the
+  difference was the interception, not the policy); the service worker (blocked,
+  allowed and removed were all the same); the user agent (Playwright's desktop
+  descriptors pin a Windows UA on a Linux runner, but removing it changed
+  nothing); a user gesture; the app's own code; the context options (a bare
+  `browser.newContext()` fails the same way); the launch options (a project
+  with nothing but `defaultBrowserType` fails the same way); the environment
+  (every variable the runner adds, removed one at a time); the page's load
+  order; the precache; concurrency (four browsers at once all gather, in a
+  plain process); and the network's own state (a cold browser and a warm one
+  behave the same, in the runner). A blank page in the same browser gathers
+  every time, and the same gather on the app's page in a plain Node process
+  gathers every time.
 
 - **Cost and limits:** the nightly's widened matrix (Node 22 + 24 × Chromium +
-  Firefox) runs tomorrow at 03:17 UTC; if Firefox continues to fail it is a real
-  regression worth investigating (e.g. Firefox build upgrade, runner environment,
-  or the pairing spec's interaction with served-app session state) rather than a
-  hidden artifact. The watchdog reports the full matrix rather than only WebKit.
+  Firefox) will be red on the Firefox legs while this stands, and the watchdog
+  reports it every morning. That is the point of the watchdog - a nightly
+  failure nobody reads is a nightly failure nobody fixes - but a nightly that
+  is always red is also a nightly nobody reads, so the coverage decision
+  (drop Firefox from the nightly, or exclude the pairing spec from the Firefox
+  project the way WebKit's is excluded, which then needs the figure check to
+  know that Firefox collects fewer tests) is left to be made deliberately
+  rather than by accident.
 
-- **Verified:** `tests/e2e/pairing-transfer.spec.ts:111` and `:273` both report
-  `ICE_GATHER_TIMEOUT` mapped from `WebRTC: ICE failed`; the `diag-ice.mjs`
-  console shows the same; the `tests/e2e/degradation.spec.ts` pin (FR-50, PRD 7.1)
-  covers the degradation path on all three engines with nothing stubbed; `tests/unit/ci-parity.test.ts` pins the WebKit exclusion, the manual-dispatch trigger,
-  and the matrix separation; and the `diag-ice` traces confirm that the failure is
-  not reproducible by changing the gather budget or turning off multicast.
+- **Verified:** CI runs `39243475462` (widened matrix, all four legs),
+  `39244996799` and `39265197964` (the same after the user agent was unpinned),
+  and the focused dispatches, all showing the same two failures with the same
+  `ICE_GATHER_TIMEOUT`; the trace artifacts show
+  `iceConnectionState: failed` with no candidate events; `tests/e2e/degradation.spec.ts`
+  still pins the missing-API path on all three engines with nothing stubbed;
+  `tests/unit/ci-parity.test.ts` still pins the WebKit exclusion, the
+  manual-dispatch trigger and the matrix separation.
 
-- **Open risk for M8:** the Firefox pairing path on Linux has never completed an
-  automated run. Whether the gap is the runner's network environment, the
-  Firefox build's ICE behaviour under load, or something in the pairing spec's
-  served-app session state remains unverified; the manual device matrix (line 2
-  of docs/INTEROP.md, `chrome-test/interop/DEVICE.md`) still needs a second
-  physical device on a real network, and the first real pairing with Firefox on a
-  Linux desktop is the only verification that closes this.
+- **Open risk for M8:** the Firefox pairing path on Linux has never completed
+  an automated run. Whether the cause is the hosted runner's network, the
+  Firefox build's ICE behaviour, or an interaction between the two is still
+  unverified; the manual device matrix still needs a second physical device on
+  a real network, and a real pairing with Firefox on a Linux desktop is the
+  only verification that closes this.

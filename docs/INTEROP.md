@@ -166,6 +166,30 @@ That arrangement produced three findings worth recording:
   on every selection would cost a file creation for a case the fallback already
   absorbs.
 
+> **Firefox on the hosted Linux runner cannot pair at all, and it is the engine
+> rather than the app.** The two pairing specs fail there while passing on
+> Chromium (Linux) and on Firefox (Windows, local): the app's peer connection
+> goes `iceConnectionState: failed` the moment the offer is set, with no
+> `icecandidate` event at all and `iceGatheringState` still `new` - the engine
+> never starts gathering, so the app reports `ICE_GATHER_TIMEOUT` and shows
+> "Couldn't find a network path. Check Wi-Fi." for a network that is fine.
+>
+> The same gather, in the same run and on the same machine, succeeds in a plain
+> Node process (about thirty milliseconds) and on a blank page in the same
+> browser; the app's own `PeerSession.createOffer()` succeeds against the same
+> origin. Waiting does not help - a document whose first attempt failed never
+> recovers - and neither does turning off candidate obfuscation, blocking or
+> removing the service worker, removing the user agent, warming the browser, or
+> loading the page a second time. The offline pairing spec passes, because it
+> pairs with the network cut.
+>
+> So the pairing path in Firefox is **not** covered on the hosted runner, and a
+> user whose first page in a freshly started Firefox is this app may see the
+> same failure. Whether that is the runner's network or the Firefox build is
+> still unknown; it is recorded in `docs/DECISIONS.md` with everything that was
+> ruled out. The manual matrix below still has a Firefox row, and a real
+> pairing on a Linux desktop is the only verification that closes this.
+
   Both halves are now visible on the device itself: the debug panel (FR-50)
   reports reachability and writability as separate rows next to the sink
   `chooseSink()` would take, so a field report from a real phone can show a

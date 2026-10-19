@@ -77,6 +77,14 @@ pairing, which no WebKit build here has ever done, and reports the browser's own
 capabilities per platform — the two builds disagree, which is why that table is
 keyed by platform rather than by engine.
 
+One thing the nightly cannot yet prove, and says so rather than hiding: Firefox
+cannot gather local ICE candidates on the hosted Linux runner at all, so the two
+specs that pair a live network fail there while everything else in that leg
+passes. The cause is the engine rather than the app — the same gather succeeds
+in a plain process on the same machine — and it is written up, with everything
+that was ruled out, in [docs/INTEROP.md](docs/INTEROP.md) and
+[docs/DECISIONS.md](docs/DECISIONS.md).
+
 ## Using it
 
 1. Open Dropbeam on both devices on the same network.
