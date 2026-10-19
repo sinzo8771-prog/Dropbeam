@@ -5,6 +5,7 @@ import { afterEach } from "vitest";
 import { QrTile } from "../../src/ui/components/QrTile";
 import { CodeBox, groupCode } from "../../src/ui/components/CodeBox";
 import { ProgressRow, formatBytes } from "../../src/ui/components/ProgressRow";
+import { translatorFor } from "../../src/core/platform/i18n";
 import { Prompt } from "../../src/ui/components/Prompt";
 import { Beam } from "../../src/ui/components/Beam";
 import { VerifyCard } from "../../src/ui/components/VerifyCard";
@@ -18,6 +19,8 @@ import { MemoryChannel } from "../helpers/memory-channel";
 import type { ChannelLike } from "../../src/core/transfer/channel";
 
 afterEach(cleanup);
+
+const t = translatorFor("en");
 
 /**
  * Minimal data-channel-only SDP (PRD 8.2.1 template) used to drive the host
@@ -131,6 +134,7 @@ describe("ProgressRow (PRD 10.1 #6)", () => {
   it("exposes transfer progress accessibly", () => {
     const { container } = render(
       <ProgressRow
+        t={t}
         name="holiday.mp4"
         size={1048576}
         phase="TRANSFERRING"
@@ -153,6 +157,7 @@ describe("ProgressRow (PRD 10.1 #6)", () => {
   it("hides cancel for terminal phases", () => {
     render(
       <ProgressRow
+        t={t}
         name="a.txt"
         size={10}
         phase="DONE"
@@ -163,6 +168,69 @@ describe("ProgressRow (PRD 10.1 #6)", () => {
       />,
     );
     expect(screen.queryByText("Cancel")).toBeNull();
+  });
+
+  it("shows the phase in the language the app is in, not in English", () => {
+    // The phase labels used to be English literals inside this component, so a
+    // Hindi user saw English in the middle of the transfer list.
+    render(
+      <ProgressRow
+        t={translatorFor("hi")}
+        name="a.txt"
+        size={10}
+        phase="TRANSFERRING"
+        sent={5}
+        total={10}
+        cancelLabel="रद्द"
+        onCancel={() => {}}
+      />,
+    );
+    expect(screen.getByText("भेजा जा रहा है")).toBeTruthy();
+    expect(screen.queryByText("Transferring")).toBeNull();
+  });
+
+  it("shows a speed and an ETA once there is a rate to show", () => {
+    // The row is re-rendered on every progress tick, so the rate comes from
+    // the gap between two samples rather than from the session.
+    const row = (sent: number) => (
+      <ProgressRow
+        t={t}
+        name="a.bin"
+        size={10 * 1024 * 1024}
+        phase="TRANSFERRING"
+        sent={sent}
+        total={10 * 1024 * 1024}
+        cancelLabel="Cancel"
+        onCancel={() => {}}
+      />
+    );
+    const { rerender } = render(row(1024 * 1024));
+    // No rate yet: the first sample has nothing to compare against.
+    expect(screen.queryByTestId("row-rate")).toBeNull();
+
+    rerender(row(2 * 1024 * 1024));
+    // One tick later there is a rate, and with it an estimate of the rest.
+    expect(screen.getByTestId("row-rate")).toBeTruthy();
+    expect(screen.getByTestId("row-eta")).toBeTruthy();
+    expect(screen.getByTestId("row-rate").textContent).toMatch(/\/s$/);
+    expect(screen.getByTestId("row-eta").textContent).toMatch(/left$/);
+  });
+
+  it("shows no speed once the transfer is not running", () => {
+    render(
+      <ProgressRow
+        t={t}
+        name="a.bin"
+        size={1024}
+        phase="DONE"
+        sent={1024}
+        total={1024}
+        cancelLabel="Cancel"
+        onCancel={() => {}}
+      />,
+    );
+    expect(screen.queryByTestId("row-rate")).toBeNull();
+    expect(screen.queryByTestId("row-eta")).toBeNull();
   });
 
   it("formats sizes with the mono-scale precision", () => {

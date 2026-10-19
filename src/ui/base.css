@@ -661,7 +661,9 @@ dialog.sheet {
 }
 
 .row-size,
-.row-pct {
+.row-pct,
+.row-rate,
+.row-eta {
   font-family: var(--font-mono);
   font-size: var(--fs-xs);
   color: var(--ink-muted);

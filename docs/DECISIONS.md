@@ -1910,3 +1910,36 @@ encountered an internal error` on `page.reload()` and `page.goto()` while the
   153600 B)` and `initial JS uncompressed: 140491 B (budget 153600 B)`; the
   README's figure is rewritten by the gate, and `gate-figures.test.ts` pins
   both numbers in the summary and in the log line.
+
+## 2026-10-19 · The transfer row's own comment claimed a speed and an ETA it did not show
+
+- **Problem:** PRD §10.1 screen 6 asks for transfer rows with "icon, name,
+  size, progress bar, **speed, ETA** and cancel", and `ProgressRow`'s doc
+  comment repeated that list - but the component rendered the name, the size,
+  the bar, a percentage and the cancel button, and nothing else. It also
+  carried its phase labels ("Queued", "Waiting for approval", ...) as English
+  literals inside the component, so a Hindi user saw English in the middle of
+  the transfer list - the one place in the app where a phase matters most.
+
+- **Choice:** show the speed and the ETA, and translate the phases. The rate is
+  measured in the row rather than carried in the session's progress report,
+  because a rate is only meaningful over an interval and the row is what sees
+  every sample; it is smoothed, so one slow tick cannot reset the number and
+  one fast tick cannot spike it. The phase labels moved into both catalogs.
+
+- **Reason:** the component's comment is a claim about the component, and it
+  was false in the same way the size figure was - a list of things the file
+  said it did, which it did not do. And an untranslated label in the transfer
+  list is the defect DoD 12's "both languages" is about, in the place where
+  the user is watching bytes move.
+
+- **Cost and limits:** the per-file icon §10.1 also lists is still not there -
+  the row leads with the file's name, and adding artwork per file type is a
+  design decision rather than a missing line, so it is recorded as open rather
+  than quietly dropped from the list. The speed and the ETA are estimates from
+  the samples seen so far: a transfer that has not moved yet shows neither.
+
+- **Verified:** `tests/unit/ui.test.tsx` covers the Hindi phase label, the
+  speed and the ETA appearing once there is a rate, and their absence when
+  the transfer is not running; the two catalogs stay in parity. `npm run test`
+  is 408 green.

@@ -97,6 +97,7 @@ export function TransferPanel({
           {files.map((file) => (
             <ProgressRow
               key={file.fid}
+              t={t}
               name={file.name}
               size={file.size}
               phase={file.phase}
