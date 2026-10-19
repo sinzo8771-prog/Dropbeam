@@ -48,6 +48,7 @@ function shippedTextFiles(): { file: string; text: string }[] {
     "src/ui/i18n/en.json",
     "src/ui/i18n/hi.json",
     "src/ui/App.tsx",
+    "src/ui/about.tsx",
     "src/ui/debug.tsx",
     "src/ui/help.tsx",
     "src/ui/settings.tsx",

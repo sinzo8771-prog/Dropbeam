@@ -65,6 +65,8 @@ these DOM APIs from core.
 
 ```
 src/ui/App.tsx          screen switch driven by ConnectionStateMachine.snapshot()
+src/ui/about.tsx        About and privacy (PRD 10.1 #7); lazily loaded like the
+                        settings sheet, because it is not needed for first paint
 src/ui/components/      QrTile, Beam, CodeBox, Prompt, ProgressRow
 src/ui/i18n/            en.json, hi.json (key parity enforced by a unit test)
 ```

@@ -37,6 +37,7 @@ const SCREENS: { name: string; open: (page: Page) => Promise<void> }[] = [
     },
   },
   { name: "self-test", open: async (page) => void (await page.goto("/?screen=selftest")) },
+  { name: "about", open: async (page) => void (await page.goto("/?screen=about")) },
 ];
 
 /** The single elevated surface class. `page` is the other level. */
