@@ -1799,3 +1799,39 @@ encountered an internal error` on `page.reload()` and `page.goto()` while the
   `tests/unit/filename.test.ts`, `tests/unit/backpressure.test.ts` and
   `tests/unit/scanner.test.ts`; `npm run ci` is green and the README's figures
   follow.
+
+## 2026-10-19 · NFR-4's memory bound was stated and never measured
+
+- **Problem:** NFR-4 says "streaming sinks keep heap under 150 MB regardless of
+  file size", and M5's done-when asks for a 2 GB transfer on Chromium with the
+  heap under 150 MB. Nothing measured the heap. The nearest thing was a 50 MB
+  round trip labelled "NFR-2/NFR-3 smoke" - throughput and reliability, not
+  memory - and the stock test channel keeps every frame it delivers in an
+  inbox, so a heap measurement through it would have measured the harness
+  rather than the app.
+
+- **Choice:** measure the bound with a channel that keeps nothing and a sink
+  that throws the bytes away, and check the structural claim beside it: every
+  frame on the wire carries at most one chunk's payload, and the number of
+  frames is the number of chunks the file has. The two sizes are compared -
+  8 MB and 32 MB - because the requirement is "regardless of file size", and a
+  single size could not show that.
+
+- **Reason:** the app is genuinely streaming (the sender reads `blob.stream()`
+  and cuts 16 KiB chunks; the hasher is incremental), so the bound holds and
+  the test is there to keep it true - a regression to `await blob.arrayBuffer()`
+  would show up as a heap that grows with the file, which is exactly the shape
+  the second assertion rules out. Comparing the two sizes rather than one is
+  what makes the test independent of the runner's own heap noise.
+
+- **Cost and limits:** the measurement is of a Node process, not of a browser
+  tab, so it is a proxy for NFR-4 rather than the thing itself; the real
+  browser number still wants the 2 GB transfer on Chromium, which is a
+  hardware row. The thresholds are generous on purpose (16 MB of slack between
+  the two sizes) so the test fails on a real regression rather than on a
+  runner's garbage collection.
+
+- **Verified:** `tests/integration/memory.test.ts` - the frame count equals
+  `ceil(size / CHUNK_SIZE)` and no frame exceeds `CHUNK_SIZE + 9` bytes; the
+  heap for a 32 MB transfer stays under 150 MB and within 16 MB of the heap an
+  8 MB transfer costs. `npm run test` is 393 green.
