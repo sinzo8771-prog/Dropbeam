@@ -1678,7 +1678,7 @@ encountered an internal error` on `page.reload()` and `page.goto()` while the
 
 - **Cost and limits:** the nightly's Firefox leg used to run the whole gate, and
   would have been red on the two pairing specs every single night. A leg that
-  is always red proves nothing about the other twenty-six specs it also runs,
+  is always red proves nothing about the other twenty-five specs it also runs,
   and a watchdog that reports a known limitation every morning is a watchdog
   people stop reading - so the leg was narrowed rather than left broken. The
   coverage question is settled below.

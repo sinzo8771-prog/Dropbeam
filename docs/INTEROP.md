@@ -195,7 +195,7 @@ That arrangement produced three findings worth recording:
 > collects fewer tests than the others and cannot check the README's figures.
 > It is therefore a job of its own running `npm run test:firefox`, exactly like
 > the WebKit leg, and the Chromium legs keep the gate and the figures. The
-> nightly's Firefox leg is green, and what it proves is the other twenty-six
+> nightly's Firefox leg is green, and what it proves is the other twenty-five
 > specs on Linux — which is more than a leg that is red on a known limitation
 > ever proves.
 

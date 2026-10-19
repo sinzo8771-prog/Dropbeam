@@ -136,11 +136,14 @@ describe("e2e engine selection", () => {
       expect(ignore).toBeInstanceOf(RegExp);
       expect(ignore?.test("pairing-transfer.spec.ts")).toBe(true);
       // Nothing else is excluded: the rest of the suite is exactly what
-      // Firefox can run here.
-      const others = readdirSync(specDir)
+      // Firefox can run here. Self-updating, like the WebKit exclusion above.
+      const specs = readdirSync(specDir)
         .filter((name) => name.endsWith(".spec.ts"))
-        .filter((name) => name !== "pairing-transfer.spec.ts");
-      expect(others.filter((name) => ignore?.test(name))).toEqual([]);
+        .sort();
+      expect(specs.filter((name) => ignore?.test(name))).toEqual([
+        // The one spec that needs a live peer connection.
+        "pairing-transfer.spec.ts",
+      ]);
     } else {
       expect(ignore).toBeUndefined();
     }
