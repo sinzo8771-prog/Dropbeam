@@ -60,6 +60,20 @@ export function TransferPanel({
     onSendFiles([...picked]);
   };
 
+  /**
+   * FR-20: send a received file back to the peer.
+   *
+   * The bytes are read back from where the sink put them rather than from the
+   * app's memory - the app never keeps a received file's bytes - so this is
+   * available whenever the sink can still reach its own output. A sink that
+   * cannot does not offer the action at all.
+   */
+  const sendBack = async (result: SaveResult): Promise<void> => {
+    const blob = result.blob ?? (await result.read?.());
+    if (!blob) return;
+    onSendFiles([new File([blob], result.name)]);
+  };
+
   const submitNote = (): void => {
     if (note.trim() === "") return;
     onSendText(note);
@@ -152,20 +166,35 @@ export function TransferPanel({
                 <span class="row-name">{result.name}</span>
                 <span class="row-size">{t("transfer.saved")}</span>
               </div>
-              {/* FR-20: after a file is saved, the obvious next thing is to
-                  open it. A sink that kept the bytes gives a URL to open;
-                  one that streamed them to disk does not, so the action is
-                  simply not offered rather than offered and broken. */}
-              {result.url ? (
+              {/* FR-20: after a file is saved, the obvious next things are to
+                  open it or to send it back. "Open" needs a URL, which only
+                  the sinks that kept the bytes can give; "Send back" needs
+                  the sink to still be able to read its own output, which the
+                  File System Access sink can and the others can too. Either
+                  way the action is not offered rather than offered and
+                  broken. */}
+              {result.url || result.read || result.blob ? (
                 <div class="row-foot">
-                  <a
-                    class="btn btn-quiet"
-                    href={result.url}
-                    download={result.name}
-                    data-testid="saved-open"
-                  >
-                    {t("action.open")}
-                  </a>
+                  {result.url ? (
+                    <a
+                      class="btn btn-quiet"
+                      href={result.url}
+                      download={result.name}
+                      data-testid="saved-open"
+                    >
+                      {t("action.open")}
+                    </a>
+                  ) : null}
+                  {result.read || result.blob ? (
+                    <button
+                      type="button"
+                      class="btn btn-quiet"
+                      data-testid="saved-send-back"
+                      onClick={() => void sendBack(result)}
+                    >
+                      {t("action.sendBack")}
+                    </button>
+                  ) : null}
                 </div>
               ) : null}
             </li>

@@ -73,6 +73,7 @@
   "action.accept": "स्वीकार करें",
   "action.save": "सहेजें",
   "action.open": "खोलें",
+  "action.sendBack": "वापस भेजें",
   "update.available": "नया संस्करण उपलब्ध है।",
   "update.reload": "फिर लोड करें",
   "resume.hint": "{count} फ़ाइल प्रभावित। दोबारा जोड़कर जारी रखें — जो मिल चुका है वह दोबारा नहीं भेजा जाएगा।",

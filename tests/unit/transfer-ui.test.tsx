@@ -42,8 +42,15 @@ describe("TransferPanel (PRD 10.1 screen 6)", () => {
   it("renders a progress row per file and lets the user cancel", () => {
     const onCancel = vi.fn();
     const files: FileProgress[] = [
-      { fid: 1, name: "holiday.mp4", size: 2048, phase: "TRANSFERRING", done: 1024 },
-      { fid: 3, name: "notes.txt", size: 10, phase: "DONE", done: 10 },
+      {
+        fid: 1,
+        name: "holiday.mp4",
+        size: 2048,
+        type: "video/mp4",
+        phase: "TRANSFERRING",
+        done: 1024,
+      },
+      { fid: 3, name: "notes.txt", size: 10, type: "text/plain", phase: "DONE", done: 10 },
     ];
     render(
       <TransferPanel t={t} files={files} saved={[]} notes={[]} {...noop} onCancel={onCancel} />,
@@ -148,8 +155,22 @@ describe("TransferPanel (PRD 10.1 screen 6)", () => {
 
   it("shows a total over the files that are moving (FR-15)", () => {
     const files: FileProgress[] = [
-      { fid: 1, name: "a.bin", size: 1000, phase: "TRANSFERRING", done: 500 },
-      { fid: 2, name: "b.bin", size: 1000, phase: "TRANSFERRING", done: 250 },
+      {
+        fid: 1,
+        name: "a.bin",
+        size: 1000,
+        type: "application/octet-stream",
+        phase: "TRANSFERRING",
+        done: 500,
+      },
+      {
+        fid: 2,
+        name: "b.bin",
+        size: 1000,
+        type: "application/octet-stream",
+        phase: "TRANSFERRING",
+        done: 250,
+      },
     ];
     render(<TransferPanel t={t} files={files} saved={[]} notes={[]} {...noop} />);
     const total = screen.getByTestId("rows-total");
@@ -162,7 +183,14 @@ describe("TransferPanel (PRD 10.1 screen 6)", () => {
 
   it("warns that a locked screen may pause the transfer (FR-19)", () => {
     const files: FileProgress[] = [
-      { fid: 1, name: "a.bin", size: 1000, phase: "TRANSFERRING", done: 0 },
+      {
+        fid: 1,
+        name: "a.bin",
+        size: 1000,
+        type: "application/octet-stream",
+        phase: "TRANSFERRING",
+        done: 0,
+      },
     ];
     render(<TransferPanel t={t} files={files} saved={[]} notes={[]} {...noop} />);
     expect(screen.getByText(/locks its screen/)).toBeTruthy();

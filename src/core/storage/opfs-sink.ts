@@ -233,9 +233,12 @@ export class OpfsSink implements Sink {
           size: this.bytes,
           sink: "opfs",
           url: URL.createObjectURL(file),
+          // FR-20: the staged file is still in OPFS, so it can be read back
+          // and sent back without the app ever holding its bytes.
+          read: async () => handle.getFile(),
         };
       }
-      return { name: meta.name, size: this.bytes, sink: "opfs" };
+      return { name: meta.name, size: this.bytes, sink: "opfs", read: async () => handle.getFile() };
     } catch (err) {
       throw mapWriteError(err);
     } finally {

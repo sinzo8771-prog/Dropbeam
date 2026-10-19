@@ -76,6 +76,8 @@ export class MemorySink implements Sink {
     }
     const result: SaveResult = { name: meta.name, size: this.bytes, sink: "memory", blob };
     if (this.url) result.url = this.url;
+    // FR-20: the bytes are still here, so the file can be sent back.
+    result.read = async () => blob;
     this.chunks = [];
     return result;
   }

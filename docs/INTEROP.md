@@ -231,14 +231,11 @@ regression through the real UI.
 > hardware, and they are open here rather than forgotten:
 >
 > - **The per-file icon** (PRD 10.1 screen 6 lists "icon, name, size, progress
->   bar, speed, ETA and cancel"). The row leads with the file's name; the icon
->   is artwork per file type, which is a design decision rather than a missing
->   line.
-> - **"Send back"** after a received file is saved (FR-20). The app does not
->   keep a received file's bytes — that is the privacy model — so sending it
->   back would mean reading them back out of the sink, which only the OPFS sink
->   can do. Recorded in `docs/DECISIONS.md`; the "Open" action FR-20 also asks
->   for is built, for the files whose sink kept the bytes.
+>   bar, speed, ETA and cancel") and **"Send back"** after a received file is
+>   saved (FR-20) are both built now: the row leads with a flat icon chosen
+>   from the file's kind, and "Send back" reads the file back from the sink
+>   that wrote it — so the app still never holds a received file's bytes. See
+>   `docs/DECISIONS.md`.
 
 ## Manual (fill during M8)
 

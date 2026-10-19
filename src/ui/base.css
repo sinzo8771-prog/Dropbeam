@@ -660,6 +660,16 @@ dialog.sheet {
   white-space: nowrap;
 }
 
+/* The file-type icon: the row's leading mark, in the row's own colour. */
+.file-icon {
+  flex: none;
+  color: var(--ink-muted);
+}
+
+.row-head:has(.file-icon) .row-name {
+  flex: 1;
+}
+
 .row-size,
 .row-pct,
 .row-rate,

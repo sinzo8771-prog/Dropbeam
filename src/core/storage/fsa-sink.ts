@@ -112,7 +112,14 @@ export class FsaSink implements Sink {
       throw mapWriteError(err);
     }
     this.writable = null;
-    return { name: meta.name, size: this.bytes, sink: "fsa" };
+    return {
+      name: meta.name,
+      size: this.bytes,
+      sink: "fsa",
+      // FR-20: the file went where the user chose, and the handle can still
+      // read it back - so "Send back" is still possible for this sink.
+      read: async () => this.handle.getFile(),
+    };
   }
 
   async abort(): Promise<void> {

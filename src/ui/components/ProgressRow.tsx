@@ -2,6 +2,7 @@ import { useRef } from "preact/hooks";
 import type { FilePhase } from "../../core/transfer/phase";
 import type { StringKey, Translate } from "../../core/platform/i18n";
 import { formatBytes, formatDuration, formatRate, RateMeter } from "../format";
+import { FileIcon, fileKind } from "./FileIcon";
 
 /**
  * Per-file transfer row (PRD 10.1 screen 6): name, size, progress bar, speed,
@@ -18,6 +19,8 @@ export type ProgressRowProps = {
   t: Translate;
   name: string;
   size: number;
+  /** The file's media type, so the row can pick an icon for it (PRD 10.1 #6). */
+  type?: string;
   phase: FilePhase;
   sent: number;
   total: number;
@@ -43,6 +46,7 @@ export function ProgressRow({
   t,
   name,
   size,
+  type,
   phase,
   sent,
   total,
@@ -65,6 +69,7 @@ export function ProgressRow({
   return (
     <li class="row" data-testid="progress-row">
       <div class="row-head">
+        <FileIcon kind={fileKind(type ?? "", name)} />
         <span class="row-name" title={name}>
           {name}
         </span>

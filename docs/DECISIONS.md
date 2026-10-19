@@ -1983,3 +1983,41 @@ encountered an internal error` on `page.reload()` and `page.goto()` while the
   the warning appearing only while something is moving;
   `tests/unit/ui.test.tsx` covers the rolling rate and the phase labels.
   `npm run test` is 412 green.
+
+## 2026-10-19 · The per-file icon and "Send back" are built, not deferred
+
+- **Problem:** the two PRD items left open by the previous entry were both
+  recorded as design decisions rather than missing lines. They were not
+  missing lines after all: the icon is a drawing, and "Send back" turns out to
+  be possible for every sink, because every sink can still read its own output.
+
+- **Choice:** build both. The **icon** is a small inline SVG per file kind -
+  image, video, audio, document, archive, code, file - chosen from the media
+  type and falling back to the extension, drawn flat and stroked in
+  `currentColor` like the rest of the app's artwork, and hidden from assistive
+  technology because the file's name sits right beside it. To choose the icon
+  at all, a file's media type now travels with its progress record.
+  **"Send back"** reads the file back from where the sink put it and sends
+  that: the app still never holds a received file's bytes, so each sink now
+  offers a `read()` on its result, and the action is offered whenever one
+  exists.
+
+- **Reason:** the reason "Send back" was thought impossible was that the app
+  does not keep received bytes - but the bytes were never the app's to keep:
+  they were in the sink, and all three sinks (memory, OPFS and File System
+  Access) can still reach what they wrote. The privacy model is unchanged, and
+  the action turned out to be cheaper than the decision to defer it.
+
+- **Cost and limits:** a file whose sink cannot be read back does not offer
+  the action, rather than offering one that fails - which today means none of
+  them, but the shape is the honest one. The icon is one glyph per *kind*, not
+  per format: a `.heic` is an image, a `.docx` is a document. A "Send back" of
+  a very large file re-reads it from the sink, which is a copy the user may
+  not expect; the button says what it does, and the read is streaming.
+
+- **Verified:** `tests/unit/file-icon.test.tsx` covers the kind mapping, the
+  extension fallback, the icon being decorative and stroked, and "Send back"
+  reading the file back and sending it - and not being offered when the sink
+  cannot read it. The release audit and the pairing spec now ask for the
+  note's Send button *exactly*, because a role name matches a substring and
+  "Send back" contains "Send". `npm run test` is 418 green.

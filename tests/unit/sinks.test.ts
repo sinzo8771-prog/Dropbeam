@@ -73,7 +73,12 @@ describe("FsaSink (PRD 8.5)", () => {
     await sink.write(PAYLOAD.subarray(0, 3));
     await sink.write(PAYLOAD.subarray(3));
     const result = await sink.close();
-    expect(result).toEqual({ name: "report.pdf", size: 6, sink: "fsa" });
+    expect(result).toMatchObject({ name: "report.pdf", size: 6, sink: "fsa" });
+    // FR-20: the handle can still read the file back, so "Send back" is
+    // possible even for a sink that streamed the bytes to disk.
+    expect(typeof result.read).toBe("function");
+    const readBack = await result.read!();
+    expect(new Uint8Array(await readBack.arrayBuffer())).toEqual(new Uint8Array(PAYLOAD));
     // The byte stream on disk, not the chunk boundaries the sink was fed.
     expect(fake.bytes).toEqual([1, 2, 3, 4, 5, 6]);
     expect(state.closed).toBe(true);

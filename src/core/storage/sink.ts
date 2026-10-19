@@ -18,6 +18,15 @@ export type SaveResult = {
   url?: string;
   /** Raw bytes when the sink kept them in memory (used by tests). */
   blob?: Blob;
+  /**
+   * Reads the saved file back, when the sink can still reach it.
+   *
+   * This is what makes FR-20's "Send back" possible without the app keeping
+   * a received file's bytes: the file stays where it was written, and this
+   * hands the sender a handle on it. A sink that cannot read its own output
+   * simply does not provide it, and the action is not offered.
+   */
+  read?: () => Promise<Blob>;
 };
 
 export interface Sink {

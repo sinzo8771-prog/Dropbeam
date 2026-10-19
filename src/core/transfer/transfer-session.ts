@@ -25,6 +25,8 @@ export type FileProgress = {
   fid: number;
   name: string;
   size: number;
+  /** The file's media type, so the row can pick an icon for it (PRD 10.1 #6). */
+  type: string;
   phase: FilePhase;
   done: number;
 };
@@ -72,8 +74,10 @@ export class TransferSession {
   constructor(private readonly opts: TransferSessionOptions) {
     const events = opts.events ?? {};
     this.store = opts.store ?? resumeStore;
-    const track = (fid: number, name: string, size: number) => {
-      if (!this.files.has(fid)) this.files.set(fid, { fid, name, size, phase: "QUEUED", done: 0 });
+    const track = (fid: number, name: string, size: number, type = "") => {
+      if (!this.files.has(fid)) {
+        this.files.set(fid, { fid, name, size, type, phase: "QUEUED", done: 0 });
+      }
       return this.files.get(fid)!;
     };
 
@@ -103,7 +107,7 @@ export class TransferSession {
       {
         onHello: (hello) => events.onHello?.(hello.name ?? ""),
         onOffer: (offer) => {
-          for (const f of offer.files) track(f.fid, f.name, f.size);
+          for (const f of offer.files) track(f.fid, f.name, f.size, f.type);
           events.onOffer?.(offer);
         },
         onText: (text) => events.onText?.(text),
@@ -212,7 +216,9 @@ export class TransferSession {
     // blobs themselves stay in the Sender's in-flight set: a dropped channel
     // parks them there, and a re-paired session re-offers them (resume).
     const parity = this.opts.fidParity ?? 0;
-    safe.forEach((f, index) => this.track(parity + 1 + index * 2, f.name, f.blob.size));
+    safe.forEach((f, index) =>
+      this.track(parity + 1 + index * 2, f.name, f.blob.size, f.type),
+    );
     try {
       await this.sender.sendFiles(safe);
     } catch (err) {
@@ -252,7 +258,9 @@ export class TransferSession {
     return [...this.files.values()].map((f) => ({ ...f }));
   }
 
-  private track(fid: number, name: string, size: number): void {
-    if (!this.files.has(fid)) this.files.set(fid, { fid, name, size, phase: "QUEUED", done: 0 });
+  private track(fid: number, name: string, size: number, type = ""): void {
+    if (!this.files.has(fid)) {
+      this.files.set(fid, { fid, name, size, type, phase: "QUEUED", done: 0 });
+    }
   }
 }

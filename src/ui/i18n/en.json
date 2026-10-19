@@ -91,6 +91,7 @@
   "action.accept": "Accept",
   "action.save": "Save",
   "action.open": "Open",
+  "action.sendBack": "Send back",
 
   "update.available": "New version available.",
   "update.reload": "Reload",

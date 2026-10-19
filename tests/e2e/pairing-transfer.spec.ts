@@ -171,7 +171,9 @@ test.describe("pairing and transfer (INTEROP: one engine, two contexts, paste ro
       // FR-12: a note travels the other way.
       const note = "hello from the other browser";
       await guest.locator("#note-body").fill(note);
-      await guest.getByRole("button", { name: "Send" }).click();
+      // The note's own Send button, not the "Send back" on a saved file: a role
+    // name matches a substring unless it is asked to match exactly.
+    await guest.getByRole("button", { name: "Send", exact: true }).click();
       await expect(host.getByTestId("note-row")).toContainText(note, { timeout: 30_000 });
 
       // A clean session must not have logged a single error on either device.

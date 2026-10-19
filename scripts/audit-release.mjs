@@ -188,7 +188,9 @@ try {
     await guest.getByRole("button", { name: "Accept" }).click();
     await guest.getByTestId("saved-row").waitFor({ timeout: 60000 });
     await guest.locator("#note-body").fill("back the other way");
-    await guest.getByRole("button", { name: "Send" }).click();
+    // The note's own Send button: a role name matches a substring unless it is
+    // asked to match exactly, and the saved file offers a "Send back" too.
+    await guest.getByRole("button", { name: "Send", exact: true }).click();
     await host.getByTestId("note-row").waitFor({ timeout: 30000 });
     await host.waitForTimeout(1500);
   } finally {
