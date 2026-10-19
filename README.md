@@ -55,7 +55,7 @@ Chromium — `E2E_BROWSERS=firefox` for the second engine), `npm run test:webkit
 `npm run size` (gzip budget), `npm run pwa:health` (installability probe),
 `npm run audit:release` (Lighthouse + same-origin network audit).
 
-Current gate: 386 tests green (358 unit/integration + 28 e2e), initial JS
+Current gate: 387 tests green (359 unit/integration + 28 e2e), initial JS
 ~137.0 KB gz against a 153.6 KB budget, Lighthouse mobile **99 / 100 / 100 /
 100** (Performance / Accessibility / Best practices / SEO), and a network audit
 over a real pairing + transfer showing only same-origin requests. Both of those
@@ -102,7 +102,7 @@ the hotspot trick and the browser support table.
 
 `v1.0`. Everything buildable and testable from a desk is gated by `npm run ci`:
 pairing, verification, approval, two-way transfers, the settings sheet, the PWA
-shell and the release audit are all covered by 358 unit/integration and
+shell and the release audit are all covered by 359 unit/integration and
 28 e2e tests. M8 is the one milestone with work left, and none of it is code: it
 is the hardware rows of the [interop matrix](docs/INTEROP.md), which need two
 physical devices on a real network. That matrix, not a commit message, is the
