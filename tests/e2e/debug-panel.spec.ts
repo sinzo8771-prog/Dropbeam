@@ -22,12 +22,26 @@ import { expect, type Page, test } from "@playwright/test";
  * absorbing. File System Access is Chromium-only; the other two stage through
  * OPFS, which is the PRD 8.5 path Firefox and Safari take.
  */
-const CAPABILITIES: Record<string, { webrtc: string; fsa: string; opfs: string; sink: string }> = {
+type Capability = { webrtc: string; fsa: string; opfs: string; sink: string };
+
+const CAPABILITIES: Record<string, Capability> = {
   chromium: { webrtc: "yes", fsa: "yes", opfs: "yes", sink: "fsa" },
   firefox: { webrtc: "yes", fsa: "no", opfs: "yes", sink: "opfs" },
-  // WebKit cannot pair at all, which is why its project excludes the pairing
-  // spec; for the same reason it has no File System Access.
-  webkit: { webrtc: "no", fsa: "no", opfs: "yes", sink: "opfs" },
+};
+
+// WebKit's answers are keyed by platform rather than by engine: one WebKit build
+// cannot cover both the desktop runner and the phones, and they do not have to
+// agree — WebRTC in particular is reported by the engine's own platform layer,
+// and the Linux runner has it where the Windows one does not. WebKit cannot pair
+// at all, which is why its project excludes the pairing spec; for the same reason
+// it has no File System Access.
+const WEBKIT: Record<string, Capability> = {
+  // Confirmed by npm run test:webkit on Windows, and by the CI WebKit leg.
+  win32: { webrtc: "no", fsa: "no", opfs: "yes", sink: "opfs" },
+  linux: { webrtc: "yes", fsa: "no", opfs: "yes", sink: "opfs" },
+  // Never executed here at all, and never executed in CI — left open rather than
+  // assumed, so a run on macOS reports its own values instead of passing on ours.
+  darwin: { webrtc: "?", fsa: "?", opfs: "?", sink: "?" },
 };
 
 /** The gesture zone: the right 52 px of the viewport. */
@@ -105,7 +119,7 @@ test.describe("debug panel (FR-50)", () => {
 
     // What this engine can do, as the app's own detection reports it.
     const engine = test.info().project.name;
-    const caps = CAPABILITIES[engine];
+    const caps = engine === "webkit" ? WEBKIT[process.platform] : CAPABILITIES[engine];
     expect(caps, `add ${engine} to the capability table`).toBeTruthy();
     await expect(row(page, "WebRTC").locator(".value")).toHaveText(caps!.webrtc);
     await expect(row(page, "File System Access").locator(".value")).toHaveText(caps!.fsa);
