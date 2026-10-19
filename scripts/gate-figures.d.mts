@@ -16,6 +16,13 @@ export interface GateFigures {
   initialKb: string;
   /** The gzip budget, decimal KB, as a string. */
   budgetKb: string;
+  /**
+   * The same initial JS before compression, decimal KB. It is the figure the
+   * stricter budget is held to, so it is published beside the download size:
+   * quoting only the compressed one would read as three times the headroom
+   * there is.
+   */
+  rawKb: string;
 }
 
 export type FigureMode = "check" | "write";

@@ -1,16 +1,30 @@
 /**
  * PRD NFR-1: initial JS must stay under 150 KB gzipped (scanner/QR libs are
  * lazy-loaded and excluded from this budget; they are listed separately).
+ *
+ * Two numbers, because there are two questions. The **gzipped** size is what
+ * a browser downloads, and it is the one NFR-1 is about, so it is the figure
+ * the README quotes. The **uncompressed** size is what the code weighs, and
+ * this project has been holding it to the same ceiling all along - so it stays
+ * budgeted too, rather than being quietly dropped when the headline moved to
+ * the compressed number.
+ *
+ * The two used to be confused: the script decompressed each asset and printed
+ * the result labelled "B gz", so the published figure was the uncompressed
+ * size wearing the gzip label - three times larger than the truth.
  */
 import { readFileSync, readdirSync } from "node:fs";
 import { statSync } from "node:fs";
-import { gunzipSync } from "node:zlib";
+import { gzipSync } from "node:zlib";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const root = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const dist = path.join(root, "dist");
-const BUDGET = 150 * 1024;
+/** NFR-1's own budget, on the gzipped size. */
+const GZIP_BUDGET = 150 * 1024;
+/** The project's own stricter line, on the uncompressed size. */
+const RAW_BUDGET = 150 * 1024;
 
 /** Vite writes hashed assets into dist/assets/, so walk recursively. */
 function walk(dir) {
@@ -31,16 +45,13 @@ try {
   process.exit(1);
 }
 
-// Some chunks (e.g. the hand-written service worker) are not gzipped; fall
-// back to the raw size so a missing gzip stream cannot mask the budget.
-const gzSize = (file) => {
-  const bytes = readFileSync(path.join(dist, file));
-  try {
-    return gunzipSync(bytes).length;
-  } catch {
-    return bytes.length;
-  }
-};
+// The assets in dist/ are not gzipped on disk - a static host compresses them
+// on the way out - so the download size is computed here, with the same
+// zlib level a server would use. The uncompressed size is what the code
+// weighs.
+const rawSize = (file) => readFileSync(path.join(dist, file)).length;
+
+const gzSize = (file) => gzipSync(readFileSync(path.join(dist, file))).length;
 
 // "Initial" means what the document loads before first paint: the entry
 // module referenced by index.html. Vite bundles every static import into
@@ -71,19 +82,26 @@ if (initial.length === 0) {
   process.exit(1);
 }
 
-let total = 0;
+let gzTotal = 0;
+let rawTotal = 0;
 for (const f of initial) {
-  const size = gzSize(f);
-  total += size;
-  console.log(`  initial  ${f.padEnd(40)} ${String(size).padStart(7)} B gz`);
+  const gz = gzSize(f);
+  gzTotal += gz;
+  rawTotal += rawSize(f);
+  console.log(`  initial  ${f.padEnd(40)} ${String(gz).padStart(7)} B gz`);
 }
 for (const f of lazy) {
   console.log(`  lazy     ${f.padEnd(40)} ${String(gzSize(f)).padStart(7)} B gz`);
 }
 
-console.log(`initial JS total: ${total} B gz (budget ${BUDGET} B)`);
-if (total > BUDGET) {
-  console.error(`FAIL: initial JS exceeds the ${BUDGET} byte budget (NFR-1)`);
+console.log(`initial JS total: ${gzTotal} B gz (budget ${GZIP_BUDGET} B)`);
+if (gzTotal > GZIP_BUDGET) {
+  console.error(`FAIL: initial JS exceeds the ${GZIP_BUDGET} byte gzipped budget (NFR-1)`);
+  process.exit(1);
+}
+console.log(`initial JS uncompressed: ${rawTotal} B (budget ${RAW_BUDGET} B)`);
+if (rawTotal > RAW_BUDGET) {
+  console.error(`FAIL: initial JS exceeds the ${RAW_BUDGET} byte uncompressed budget`);
   process.exit(1);
 }
 console.log("OK: within budget");

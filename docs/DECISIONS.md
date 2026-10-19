@@ -1875,3 +1875,38 @@ encountered an internal error` on `page.reload()` and `page.goto()` while the
   with its real licence, the privacy page states all four things §15 lists,
   the terms cover the three, and nothing under `src/` or in `index.html` names
   another product. `npm run test` is 399 green.
+
+## 2026-10-19 · The size figure was the uncompressed size wearing the gzip label
+
+- **Problem:** the README published "137.0 KB gz of a 153.6 KB budget", and the
+  budget was PRD NFR-1's - "initial JS must stay under 150 KB gzipped". The
+  script behind it never measured a gzip size at all: `dist/` holds
+  uncompressed assets, so its `gunzipSync` call always threw and fell back to
+  the raw file size, and the result was printed with a "B gz" label. The
+  published number was therefore three times the truth - the bundle a browser
+  downloads is about 45 KB - and the gate was holding a budget on the wrong
+  quantity while describing it as the right one.
+
+- **Choice:** measure both, and publish both. The gzip size is computed here
+  (the assets are compressed on the way out by the static host, so the script
+  compresses them the same way) and is the figure NFR-1 is about, so it is the
+  one the README leads with. The uncompressed size keeps its own budget - the
+  line this project has been holding all along - and is published next to it,
+  because quoting only the compressed number would read as three times the
+  headroom there is.
+
+- **Reason:** a number that describes the wrong quantity is worse than a big
+  number, because it looks measured. Publishing both says the truth about the
+  download *and* keeps the stricter limit visible, and the gate does not get
+  looser: both budgets have to pass.
+
+- **Cost and limits:** the README's figure changes, and the earlier entries in
+  this log that quote "KB gz" figures were quoting the uncompressed size under
+  that label. They are left as they are - rewriting them would rewrite the
+  record rather than correct it - and this entry says what the old figures
+  were.
+
+- **Verified:** `npm run size` prints `initial JS total: 45091 B gz (budget
+  153600 B)` and `initial JS uncompressed: 140491 B (budget 153600 B)`; the
+  README's figure is rewritten by the gate, and `gate-figures.test.ts` pins
+  both numbers in the summary and in the log line.

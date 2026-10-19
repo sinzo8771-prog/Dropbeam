@@ -112,6 +112,11 @@ export function parseFigures(output) {
     "the initial JS size",
     /^initial JS total: (\d+) B gz \(budget (\d+) B\)$/gm,
   );
+  const raw = only(
+    text,
+    "the initial JS size, uncompressed",
+    /^initial JS uncompressed: (\d+) B \(budget (\d+) B\)$/gm,
+  );
 
   const unitTests = Number(vitest[1]);
   const e2eTests = Number(playwright[1]);
@@ -124,6 +129,10 @@ export function parseFigures(output) {
     // quoted it that way.
     initialKb: (Number(size[1]) / 1000).toFixed(1),
     budgetKb: (Number(size[2]) / 1000).toFixed(1),
+    // The uncompressed size is the one the stricter budget is held to, so it is
+    // published next to the download size: quoting only the compressed number
+    // would read as three times the headroom there is.
+    rawKb: (Number(raw[1]) / 1000).toFixed(1),
   };
 }
 
@@ -131,7 +140,8 @@ export function parseFigures(output) {
 export function formatFigures(figures) {
   return (
     `${figures.totalTests} tests (${figures.unitTests} unit/integration + ` +
-    `${figures.e2eTests} e2e), ${figures.initialKb} KB gz of ${figures.budgetKb} KB`
+    `${figures.e2eTests} e2e), ${figures.initialKb} KB gz ` +
+    `(${figures.rawKb} KB uncompressed) of ${figures.budgetKb} KB`
   );
 }
 
@@ -167,8 +177,10 @@ export function applyFigures(readme, figures) {
     },
     {
       label: "the size figure",
-      find: /~[\d.]+ KB gz against a [\d.]+ KB budget/g,
-      replace: `~${figures.initialKb} KB gz against a ${figures.budgetKb} KB budget`,
+      find: /~[\d.]+ KB gz \([\d.]+ KB uncompressed\) against a [\d.]+ KB budget/g,
+      replace:
+        `~${figures.initialKb} KB gz (${figures.rawKb} KB uncompressed) ` +
+        `against a ${figures.budgetKb} KB budget`,
     },
     {
       label: "the Status counts",

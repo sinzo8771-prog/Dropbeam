@@ -45,6 +45,7 @@ const OUTPUT = [
   "> node scripts/size-budget.mjs",
   "  initial  assets/index-Ck3n.js                135100 B gz",
   "initial JS total: 135100 B gz (budget 153600 B)",
+  "initial JS uncompressed: 141000 B (budget 153600 B)",
   "",
 ].join("\n");
 
@@ -54,12 +55,13 @@ const FIGURES: GateFigures = {
   totalTests: 318,
   initialKb: "135.1",
   budgetKb: "153.6",
+  rawKb: "141.0",
 };
 
 /** The figure-bearing sentences of README.md, with deliberately wrong numbers. */
 const README = [
   "Current gate: 300 tests green (287 unit/integration + 13 e2e), initial JS",
-  "~130.0 KB gz against a 150.0 KB budget, and a network audit.",
+  "~130.0 KB gz (141.0 KB uncompressed) against a 150.0 KB budget, and a network audit.",
   "",
   "shell, and the release audit are all covered by 287 unit/integration and",
   "13 e2e tests, plus the documented manual matrix.",
@@ -146,7 +148,7 @@ describe("gate figures (written into README.md)", () => {
     expect(updated).toBe(
       [
         "Current gate: 318 tests green (305 unit/integration + 13 e2e), initial JS",
-        "~135.1 KB gz against a 153.6 KB budget, and a network audit.",
+        "~135.1 KB gz (141.0 KB uncompressed) against a 153.6 KB budget, and a network audit.",
         "",
         "shell, and the release audit are all covered by 305 unit/integration and",
         "13 e2e tests, plus the documented manual matrix.",
@@ -189,7 +191,7 @@ describe("gate figures (written into README.md)", () => {
 
   it("describes the figures in one line", () => {
     expect(formatFigures(FIGURES)).toBe(
-      "318 tests (305 unit/integration + 13 e2e), 135.1 KB gz of 153.6 KB",
+      "318 tests (305 unit/integration + 13 e2e), 135.1 KB gz (141.0 KB uncompressed) of 153.6 KB",
     );
   });
 });

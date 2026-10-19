@@ -12,6 +12,7 @@ import { SendScreen } from "./share";
 import { useWakeLock } from "./use-wake-lock";
 import type { ComponentType } from "preact";
 import type { SettingsSheetProps } from "./settings";
+import type { AboutProps } from "./about";
 import { readStagedShare } from "../core/platform/share";
 import { formatBytes } from "./components/ProgressRow";
 import {
@@ -162,7 +163,25 @@ export function App({ settings, baseUrl }: AppProps = {}) {
   /** FR-7: when the displayed code stops being acceptable, or null. */
   const [codeExpiresAt, setCodeExpiresAt] = useState<number | null>(null);
   /** FR-60/61/62 and FR-51: app pages layered over the connection screens. */
-  const [page, setPage] = useState<"main" | "help" | "trouble" | "selftest" | "send">("main");
+  const [page, setPage] = useState<"main" | "help" | "trouble" | "selftest" | "send" | "about">(
+    "main",
+  );
+  /**
+   * NFR-1: the legal page is fetched the first time it is opened, not with
+   * the app shell. Nobody reads the terms before sending a file, and the
+   * initial bundle has a size budget to keep.
+   */
+  const [AboutScreen, setAboutScreen] = useState<ComponentType<AboutProps> | null>(null);
+  useEffect(() => {
+    if (page !== "about" || AboutScreen) return;
+    let live = true;
+    void import("./about").then((mod) => {
+      if (live) setAboutScreen(() => mod.AboutScreen);
+    });
+    return () => {
+      live = false;
+    };
+  }, [page, AboutScreen]);
   /** FR-51: files staged by the share target, waiting for a connection. */
   const [staged, setStaged] = useState<File[]>([]);
   /** Shared text/URL staged for the note field, sent only when the user sends. */
@@ -207,7 +226,7 @@ export function App({ settings, baseUrl }: AppProps = {}) {
   useEffect(() => {
     if (typeof location === "undefined") return;
     const screen = new URLSearchParams(location.search).get("screen");
-    if (screen !== "send" && screen !== "selftest") return;
+    if (screen !== "send" && screen !== "selftest" && screen !== "about") return;
     setPage(screen);
     history.replaceState(null, "", location.pathname + location.hash);
   }, []);
@@ -592,6 +611,11 @@ export function App({ settings, baseUrl }: AppProps = {}) {
     if (page === "trouble") {
       return <TroubleshootScreen t={t} onBack={() => setPage("help")} />;
     }
+    if (page === "about") {
+      // The screen is still being fetched; nothing is shown until it is here.
+      if (!AboutScreen) return null;
+      return <AboutScreen t={t} onBack={() => setPage("main")} />;
+    }
     if (page === "selftest") {
       return (
         <SelfTestScreen
@@ -699,6 +723,12 @@ export function App({ settings, baseUrl }: AppProps = {}) {
                   </button>
                   <button type="button" class="btn btn-ghost" onClick={() => setPage("selftest")}>
                     {t("nav.selfTest")}
+                  </button>
+                  {/* PRD 10.1 #7: the About/Privacy screen, so the privacy
+                      statements and the licence are reachable from the app
+                      rather than only from the repository. */}
+                  <button type="button" class="btn btn-ghost" onClick={() => setPage("about")}>
+                    {t("nav.about")}
                   </button>
                   {/* PRD 10.1 #1: settings icon beside the quiet links. Gear = a
                       circle with spokes, stroked in currentColor to stay flat. */}

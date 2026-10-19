@@ -29,4 +29,20 @@ test.describe("app shortcuts", () => {
     await expect(page.getByRole("heading", { name: "Dropbeam" })).toBeVisible();
     await expect(page.getByRole("button", { name: "Start" })).toBeVisible();
   });
+
+  test("?screen=about opens the About and privacy page", async ({ page }) => {
+    await page.goto("/?screen=about");
+    await expect(page.getByRole("heading", { name: "About and privacy" })).toBeVisible();
+    // The four statements §15 asks for are on the page, not in a document
+    // somewhere else: this is where a user would look for them.
+    await expect(page.getByText("No data is collected.")).toBeVisible();
+    await expect(page.getByText(/No cookies are set/)).toBeVisible();
+    expect(new URL(page.url()).search).toBe("");
+  });
+
+  test("the home screen's quiet links reach it", async ({ page }) => {
+    await page.goto("/");
+    await page.getByRole("button", { name: "About and privacy" }).click();
+    await expect(page.getByRole("heading", { name: "About and privacy" })).toBeVisible();
+  });
 });
