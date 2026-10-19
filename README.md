@@ -55,7 +55,7 @@ Chromium — `E2E_BROWSERS=firefox` for the second engine), `npm run test:webkit
 `npm run size` (gzip budget), `npm run pwa:health` (installability probe),
 `npm run audit:release` (Lighthouse + same-origin network audit).
 
-Current gate: 421 tests green (393 unit/integration + 28 e2e), initial JS
+Current gate: 427 tests green (399 unit/integration + 28 e2e), initial JS
 ~137.0 KB gz against a 153.6 KB budget, Lighthouse mobile **99 / 100 / 100 /
 100** (Performance / Accessibility / Best practices / SEO), and a network audit
 over a real pairing + transfer showing only same-origin requests. Both of those
@@ -101,10 +101,13 @@ the hotspot trick and the browser support table.
 - [docs/PRD.md](docs/PRD.md) — product requirements and milestones
 - [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — how the pieces fit
 - [docs/PRIVACY.md](docs/PRIVACY.md) — threat model with linked tests
+- [docs/TERMS.md](docs/TERMS.md) — terms of use
 - [docs/INTEROP.md](docs/INTEROP.md) — browser interop matrix
 - [docs/SELF-HOSTING.md](docs/SELF-HOSTING.md) — deploy guide, STUN/TURN
 - [docs/TESTING.md](docs/TESTING.md) — what each test layer covers
 - [docs/DECISIONS.md](docs/DECISIONS.md) — every notable build decision
+- [LICENSE](LICENSE) — MIT, the terms the code is under
+- [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md) — the libraries the bundle ships
 
 ## Status
 
@@ -115,7 +118,7 @@ changed between them is the CI shape and the record, and
 
 Everything buildable and testable from a desk is gated by `npm run ci`:
 pairing, verification, approval, two-way transfers, the settings sheet, the PWA
-shell and the release audit are all covered by 393 unit/integration and
+shell and the release audit are all covered by 399 unit/integration and
 28 e2e tests. M8 is the one milestone with work left, and none of it is code: it
 is the hardware rows of the [interop matrix](docs/INTEROP.md), which need two
 physical devices on a real network. That matrix, not a commit message, is the

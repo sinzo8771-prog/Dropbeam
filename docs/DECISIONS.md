@@ -1835,3 +1835,43 @@ encountered an internal error` on `page.reload()` and `page.goto()` while the
   `ceil(size / CHUNK_SIZE)` and no frame exceeds `CHUNK_SIZE + 9` bytes; the
   heap for a 32 MB transfer stays under 150 MB and within 16 MB of the heap an
   8 MB transfer costs. `npm run test` is 393 green.
+
+## 2026-10-19 · The legal deliverables were declared in package.json and never written
+
+- **Problem:** PRD §15 asks for an MIT licence with third-party notices, terms,
+  a privacy page that states exactly what it does not do, and the naming rule
+  that keeps this project clear of Apple's. The privacy page and the naming
+  rule were both already true. The other two were not there at all:
+  `package.json` declared `"license": "MIT"` and there was no `LICENSE` file
+  in the repository, no third-party notices, and no terms - so a release
+  built from this tree would have declared a licence in its metadata and
+  shipped none of its text, and would have shipped without terms.
+
+- **Choice:** write the three missing documents, and a test that checks them,
+  so the release cannot lose them again. The licence is the standard MIT text
+  with the holder as "Dropbeam contributors" - the package already declared
+  MIT, so the only decision was the file. The notices list the five libraries
+  that reach the browser (preact, uqr, jsqr, hash-wasm, fflate) with their
+  licences, read from the installed packages rather than written by hand, and
+  point at the Apache-2.0 text for `jsqr`. The terms say what §15 says they
+  must: the tool is provided as-is, the user is responsible for what they
+  send, and there is a prohibited-use notice.
+
+- **Reason:** a document that is missing cannot be read, and a licence
+  declared in a package manifest is not a licence. The test is the part that
+  matters: it reads the licences from `node_modules`, so a dependency that
+  changes licence - or a new one that reaches the bundle - fails the suite
+  rather than being forgotten here, and it checks the naming rule against
+  everything that ships rather than against the documentation.
+
+- **Cost and limits:** the terms and the copyright holder are legal text, and
+  PRD §20 asks for approval of legal text; both are written from §15's own
+  wording and are offered here for that review rather than treated as settled.
+  The notices cover the shipped dependencies; the development tools are not
+  shipped and are named in `package.json` instead.
+
+- **Verified:** `tests/unit/legal.test.ts` - the licence file exists and
+  matches `package.json`'s declaration, every shipped dependency has a row
+  with its real licence, the privacy page states all four things §15 lists,
+  the terms cover the three, and nothing under `src/` or in `index.html` names
+  another product. `npm run test` is 399 green.
