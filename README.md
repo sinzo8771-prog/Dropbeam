@@ -100,10 +100,13 @@ the hotspot trick and the browser support table.
 
 ## Status
 
-`v1.0`. Milestones M0–M8 are complete and gated by `npm run ci`: pairing,
-verification, approval, two-way transfers, the settings sheet, the PWA
-shell, and the release audit are all covered by 358 unit/integration and
-28 e2e tests, plus the documented manual matrix.
+`v1.0`. Everything buildable and testable from a desk is gated by `npm run ci`:
+pairing, verification, approval, two-way transfers, the settings sheet, the PWA
+shell and the release audit are all covered by 358 unit/integration and
+28 e2e tests. M8 is the one milestone with work left, and none of it is code: it
+is the hardware rows of the [interop matrix](docs/INTEROP.md), which need two
+physical devices on a real network. That matrix, not a commit message, is the
+authority on what is still open.
 
 The automated half of the [interop matrix](docs/INTEROP.md) runs **real
 engines** — Chromium ↔ Chromium, Chromium ↔ Firefox in both directions,

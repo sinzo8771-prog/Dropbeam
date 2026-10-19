@@ -130,9 +130,10 @@ stamped build id in place:
   service-worker health rows, and the capability rows (FR-50): WebRTC, File
   System Access, OPFS, whether OPFS can actually be written to, and the sink
   `chooseSink()` would take. Those rows are the one engine-keyed part of an
-  otherwise engine-agnostic suite, because they report the browser's own APIs;
-  the table in the spec holds the per-engine answer and `docs/INTEROP.md` the
-  measurements behind it.
+  otherwise engine-agnostic suite, because they report the browser's own APIs.
+  The table in the spec holds the expected answer per engine — and, for WebKit,
+  per platform, since its two builds disagree about WebRTC — and `docs/INTEROP.md`
+  the measurements behind it.
 - **Offline** — the app half of DoD 6. Two online visits (so the worker has
   cached the shell _and_ the hashed assets), the network cut, then a reload
   served out of the cache: the home screen boots, a deep `?screen=` route

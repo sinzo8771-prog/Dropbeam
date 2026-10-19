@@ -66,20 +66,23 @@ jobs:
 
   # The third engine, which is not a leg of the gate.
   #
-  # Playwright's WebKit build has no RTCPeerConnection, so it cannot run the
-  # pairing spec at all and its project excludes it - see playwright.config.ts.
-  # That leaves it collecting fewer tests than README.md states, which is why it
-  # is a separate job running `test:webkit` and not another matrix engine: an
-  # engine axis entry would fail the gate's own figure check for a difference
-  # that is structural rather than a regression. `scripts/gate-figures.mjs`
-  # refuses a WebKit gate run outright, and the parity suite pins that too.
+  # No WebKit build here has ever paired - the Windows one has no
+  # RTCPeerConnection at all, the Linux one's has never been put through a real
+  # peer connection - so it cannot run the pairing spec and its project excludes
+  # it; see playwright.config.ts. That leaves it collecting fewer tests than
+  # README.md states, which is why it is a separate job running `test:webkit` and
+  # not another matrix engine: an engine axis entry would fail the gate's own
+  # figure check for a difference that is structural rather than a regression.
+  # `scripts/gate-figures.mjs` refuses a WebKit gate run outright, and the parity
+  # suite pins that too.
   #
   # Scheduled, like the widened matrix legs: this run is about a browser
   # build drifting under the suite, not about the change in hand. It is also the
-  # only place the app meets a real absence of WebRTC - the unsupported-browser
-  # messaging and the connection self-test run there with nothing stubbed, while
-  # the pull requests covering that same behaviour do it with the API removed by
-  # an init script (tests/e2e/degradation.spec.ts).
+  # only place the app meets a browser's own idea of what it can do: the
+  # capability rows are read here and pinned per platform (the two WebKit builds
+  # disagree about WebRTC), while the pull requests covering the degradation
+  # behaviour do it with the API removed by an init script
+  # (tests/e2e/degradation.spec.ts).
   #
   # Or dispatched by hand, because a job that only runs at 03:17 UTC is a job
   # nobody can check. The manual trigger runs the whole workflow, so this
