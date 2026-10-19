@@ -14,7 +14,7 @@ import type { ComponentType } from "preact";
 import type { SettingsSheetProps } from "./settings";
 import type { AboutProps } from "./about";
 import { readStagedShare } from "../core/platform/share";
-import { formatBytes } from "./components/ProgressRow";
+import { formatBytes } from "./format";
 import {
   messageForError,
   translatorFor,

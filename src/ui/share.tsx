@@ -1,5 +1,5 @@
 import type { Translate } from "../core/platform/i18n";
-import { formatBytes } from "./components/ProgressRow";
+import { formatBytes } from "./format";
 
 /**
  * Send screen (PRD FR-51): files handed to the PWA through the Web
