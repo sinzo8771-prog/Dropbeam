@@ -114,6 +114,23 @@ describe("e2e engine selection", () => {
     }
   });
 
+  it("launches Firefox without host-candidate obfuscation", () => {
+    // Firefox mDNS-obfuscates its host ICE candidates by default, which needs
+    // working multicast. The hosted runner has none, so under the app's Local
+    // mode it gathered nothing and failed with `WebRTC: ICE failed, add a STUN
+    // server` - a run where the transfer path was never reached and the spec
+    // just timed out waiting for a code. Pinned because losing the preference
+    // later would look exactly like a product regression rather than a runner
+    // that quietly changed.
+    const [project] = projectsFor("firefox");
+    const use = project?.use as unknown as {
+      launchOptions?: { firefoxUserPrefs?: Record<string, unknown> };
+    };
+    expect(use?.launchOptions?.firefoxUserPrefs).toMatchObject({
+      "media.peerconnection.ice.obfuscate_host_addresses": false,
+    });
+  });
+
   it("refuses an unknown engine, and an empty list", () => {
     expect(() => projectsFor("chromium,chrome")).toThrow(/chrome, which is not/);
     expect(() => projectsFor("webkit,chrome")).toThrow(/chrome, which is not/);
