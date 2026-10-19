@@ -1723,3 +1723,39 @@ encountered an internal error` on `page.reload()` and `page.goto()` while the
   unverified; the manual device matrix still needs a second physical device on
   a real network, and a real pairing with Firefox on a Linux desktop is the
   only verification that closes this.
+
+## 2026-10-19 · `v1.0` stays where it is, and `v1.0.1` names the corrected state
+
+- **Problem:** the `v1.0` tag points at `8b56413`, which is now thirteen
+  commits behind `main`. Leaving it is not a statement that the release is
+  broken - the app is byte-identical between the two, the only difference
+  being one line of `package.json` - but the tagged tree does contain two
+  claims that have since been shown false: that WebKit's Linux build has WebRTC
+  disabled, and that the WebKit leg was dispatched by hand and passed. It also
+  contains a CI arrangement whose nightly had never run green.
+
+- **Choice:** leave `v1.0` exactly where it is, and tag the corrected state
+  `v1.0.1`.
+
+- **Reason:** a tag says what *was* released, and re-pointing it rewrites that
+  for anyone who recorded the old one - and a tag that tracks `main` is a branch
+  wearing a tag's clothes, stale again with the next commit. The `v1.0` release
+  was real: the same app, the same behaviour, the same version in
+  `package.json`. What it lacked was a name for "v1.0 with CI that actually
+  runs and documentation that is true", and a second, additive tag gives that
+  without rewriting anything. It is honestly a patch: no product behaviour
+  changed between the two, only the CI shape and the record - and this log
+  already refuses to relabel published history for the sake of tidiness, which
+  is the same rule applied in the other direction.
+
+- **Cost and limits:** two tags for one line of work, and a reader who wants
+  "the release" now has to know which of the two they mean. The README's
+  Status section names `v1.0.1` as the current one, and this entry says what
+  the difference is, so neither has to be inferred. The alternative - moving
+  `v1.0` - would have been one command and would have looked tidier while
+  quietly changing what `v1.0` means for everyone who already fetched it.
+
+- **Verified:** `git diff v1.0..main -- src/ public/ scripts/ package.json` is
+  one added line; the two claims are corrected in the 2026-10-19 entry above
+  and in the 2026-10-15 entry it supersedes; the nightly's legs are green as
+  recorded in the entries above.

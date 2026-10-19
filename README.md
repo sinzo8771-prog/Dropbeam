@@ -108,7 +108,12 @@ the hotspot trick and the browser support table.
 
 ## Status
 
-`v1.0`. Everything buildable and testable from a desk is gated by `npm run ci`:
+`v1.0.1` — the same app as `v1.0`, with the CI actually running and the
+documentation corrected (the two tags differ in no product behaviour; what
+changed between them is the CI shape and the record, and
+[docs/DECISIONS.md](docs/DECISIONS.md) says what and why).
+
+Everything buildable and testable from a desk is gated by `npm run ci`:
 pairing, verification, approval, two-way transfers, the settings sheet, the PWA
 shell and the release audit are all covered by 361 unit/integration and
 28 e2e tests. M8 is the one milestone with work left, and none of it is code: it
