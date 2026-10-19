@@ -1622,4 +1622,58 @@ encountered an internal error` on `page.reload()` and `page.goto()` while the
   impossible; it makes this one impossible to miss.
 
 - **Verified:** `npm run ci` green locally (358 unit/integration, 28 e2e) and the
-  gate run on the runner that produced the failure passes.
+  gate run on the runner that produced the failure passes. The watchdog
+  (`t3-code` scheduled task) is updated to watch the full scheduled-run matrix,
+  and the first automatic run (2026-10-19 03:17 UTC, `39227011502`) failed the
+  WebKit leg — confirming the manual-dispatch observation was real.
+
+## 2026-10-19 · Firefox pairing fails on Linux CI; the gap is not time or load
+
+- **Problem:** `tests/e2e/pairing-transfer.spec.ts` passes 28/28 on Chromium
+  (Linux) and 28/28 on Firefox (Windows, local), but fails 2/3 on Firefox
+  (Linux, hosted `ubuntu-latest`) with `ICE_GATHER_TIMEOUT` mapped from
+  `WebRTC: ICE failed, add a STUN server`. The only failing steps are the pairing
+  spec's online-hosting (`:111`) and online-connection-drop (`:273`) paths; the
+  offline pairing (`:185`) passes. The `diag-ice.mjs` probes (ten cold
+  connections to the app origin; four parallel browsers; bare `RTCPeerConnection`
+  against `http://localhost:4199/` and `http://10.1.0.114:4199/`; with and
+  without `media.peerconnection.ice.obfuscate_host_addresses` false) all gather
+  1-2 host candidates in 1-70 ms with `state: complete`, so the failure is not
+  missing multicast or a gather budget issue: Firefox *can* gather quickly in
+  every tested arrangement.
+
+- **Choice:** document the gap rather than changing the pairing spec or the
+  product's 3-second gather budget. The manual matrix (`docs/INTEROP.md`) and
+  `README.md` stay precise: the automated half passes; the hardware half (real
+  Safari/iOS, real camera QR, real Wi-Fi/hotspot, real mobile power/screen) is
+  what M8 is gated on. `playwright.config.ts` keeps `E2E_BROWSERS=firefox` out of
+  the default gate (no wider `workflow_dispatch`); the `diag/ff-trace` runs are
+  retained only in session notes, not on `main`'s history.
+
+- **Reason:** changing `GATHER_TIMEOUT_MS` (currently 3 s) to cover a Firefox
+  runner quirk would change the app's honest fast-fail contract for every browser,
+  turning a real user-visible failure on a bad network into a hidden delay; and
+  hiding the pairing spec failure (adding retries, injecting STUN) would turn a
+  real interop limitation into an invisible gap. Not knowing is acceptable; making
+  it disappear by changing the measurement is not.
+
+- **Cost and limits:** the nightly's widened matrix (Node 22 + 24 × Chromium +
+  Firefox) runs tomorrow at 03:17 UTC; if Firefox continues to fail it is a real
+  regression worth investigating (e.g. Firefox build upgrade, runner environment,
+  or the pairing spec's interaction with served-app session state) rather than a
+  hidden artifact. The watchdog reports the full matrix rather than only WebKit.
+
+- **Verified:** `tests/e2e/pairing-transfer.spec.ts:111` and `:273` both report
+  `ICE_GATHER_TIMEOUT` mapped from `WebRTC: ICE failed`; the `diag-ice.mjs`
+  console shows the same; the `tests/e2e/degradation.spec.ts` pin (FR-50, PRD 7.1)
+  covers the degradation path on all three engines with nothing stubbed; `tests/unit/ci-parity.test.ts` pins the WebKit exclusion, the manual-dispatch trigger,
+  and the matrix separation; and the `diag-ice` traces confirm that the failure is
+  not reproducible by changing the gather budget or turning off multicast.
+
+- **Open risk for M8:** the Firefox pairing path on Linux has never completed an
+  automated run. Whether the gap is the runner's network environment, the
+  Firefox build's ICE behaviour under load, or something in the pairing spec's
+  served-app session state remains unverified; the manual device matrix (line 2
+  of docs/INTEROP.md, `chrome-test/interop/DEVICE.md`) still needs a second
+  physical device on a real network, and the first real pairing with Firefox on a
+  Linux desktop is the only verification that closes this.
