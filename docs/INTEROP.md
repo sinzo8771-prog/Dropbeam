@@ -216,7 +216,7 @@ _network_ failure instead of "This browser can't do direct transfers". Both entr
 points now run the support check, and the degradation spec guards the same
 regression through the real UI.
 
-> **Manual matrix status (2026-10-18): partially covered, and the gap is now
+> **Manual matrix status (2026-10-19): partially covered, and the gap is now
 > smaller.** The browser pairs that do not need a phone are done above (Chromium
 > ↔ Chromium and Chromium ↔ Firefox, real engines, real WebRTC), and DoD 6's
 > offline claim is now automated as far as this emulator allows (above). What
@@ -226,6 +226,19 @@ regression through the real UI.
 > ↔ Android), DoD 2 (50 MB QR + link Chrome ↔ iPhone) and DoD 6's data-channel
 > half all live in those rows.** Nothing below can be filled in from a desk.
 > Record each cell as it is tested.
+>
+> Two items in the PRD are not in the manual matrix because they are not about
+> hardware, and they are open here rather than forgotten:
+>
+> - **The per-file icon** (PRD 10.1 screen 6 lists "icon, name, size, progress
+>   bar, speed, ETA and cancel"). The row leads with the file's name; the icon
+>   is artwork per file type, which is a design decision rather than a missing
+>   line.
+> - **"Send back"** after a received file is saved (FR-20). The app does not
+>   keep a received file's bytes — that is the privacy model — so sending it
+>   back would mean reading them back out of the sink, which only the OPFS sink
+>   can do. Recorded in `docs/DECISIONS.md`; the "Open" action FR-20 also asks
+>   for is built, for the files whose sink kept the bytes.
 
 ## Manual (fill during M8)
 
