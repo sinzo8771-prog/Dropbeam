@@ -1024,6 +1024,15 @@ The nightly job is now a matrix over Node (`22`, `24`) and engine (`chromium`,
   expressions themselves cannot be executed here - GitHub evaluates them - so the
   axis widening is verified as configuration: parsed with a real YAML loader,
   asserted on the exact expressions, and unrunnable locally by construction.
+  > **Superseded in part (2026-10-19):** the claim that WebKit's Linux build has
+  > WebRTC disabled is wrong. Measured on the hosted Linux runner, that build
+  > *does* report `RTCPeerConnection` - the debug panel reads `WebRTC yes` there -
+  > so the exclusion below rests on the Windows build having no API and on the
+  > Linux build never having paired, not on the setting quoted above. The engine
+  > axis has gone too: the nightly's Firefox leg is a job of its own now, because
+  > the runner's Firefox cannot gather a local candidate and so collects fewer
+  > tests than the figures state. The 2026-10-19 entry has the measurement and
+  > what the legs look like now.
 
 - **Not weakened to make it pass:** two Firefox problems were found by running
   the suite there, and both fixes are at the harness, not the assertion. The

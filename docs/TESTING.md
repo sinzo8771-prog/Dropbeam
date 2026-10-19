@@ -9,6 +9,7 @@ Commands:
 | `npm test`                   | Vitest: `tests/unit` + `tests/integration`                                     |
 | `npm run test:e2e`           | Playwright against the production build (Chromium; `E2E_BROWSERS=firefox`)     |
 | `npm run test:webkit`        | The WebKit leg: every spec but pairing, run on WebKit                          |
+| `npm run test:firefox`       | The Firefox leg: the e2e suite on Firefox                                      |
 | `npm run ci`                 | The gate: every stage in `package.json`'s `gate` list, then the README figures |
 | `npm run audit:release`      | Lighthouse mobile + same-origin network audit (starts its own preview)         |
 | `npm run docs:figures`       | The gate, forcing the README figures to be written rather than checked         |
@@ -177,9 +178,11 @@ optional. `playwright.config.ts` records both exclusions and why, and
 next one has to be written down too.
 
 Every one of those specs is engine-agnostic, which is what lets the nightly run
-the whole suite on Firefox and the WebKit leg run all but pairing on WebKit. The
-one exception is the pairing spec, which needs real WebRTC and is therefore
-excluded from WebKit's project rather than skipped inside the file.
+the suite on each engine. The one exception is the pairing spec, which needs
+real WebRTC: it is excluded from WebKit's project (the build has no
+`RTCPeerConnection` on Windows) and, on Linux, from Firefox's project as well
+(the hosted runner's engine cannot offer a local candidate at all) — excluded
+rather than skipped inside the file, so the smaller collection stays visible.
 
 ## Manual device matrix
 
@@ -286,36 +289,46 @@ command, so the job cannot fall behind the gate, and `ci-parity.test.ts` fails i
 the stages are ever listed there again. It runs on pushes to `main`, on pull
 requests, and nightly at 03:17 UTC.
 
-The job is a matrix with two axes: Node (`22`) and engine (`chromium`). A push or
-a pull request runs one leg, which is the answer that diff deserves as fast as it
-can be given. The scheduled run widens both axes — Node 22 and 24, Chromium and
-Firefox — for four legs, because those combinations are about drift rather than
-about the change in hand. Every leg runs the same command, and every leg checks
-the README figures against what it measured: the specs are engine-agnostic, so
-each engine collects the same tests, and a leg that disagreed with the README
-would be telling us the suite had become engine-dependent.
+The gate job is a matrix with one axis: Node (`22`). A push or a pull request
+runs one leg, which is the answer that diff deserves as fast as it can be given.
+The scheduled run widens that axis — Node 22 and 24 — for two legs, because that
+combination is about drift rather than about the change in hand. Every leg runs
+the same command, and every leg checks the README figures against what it
+measured: the specs are engine-agnostic, so each leg collects the same tests,
+and a leg that disagreed with the README would be telling us the suite had
+become engine-dependent.
 
 The engine comes from `E2E_BROWSERS` (see `playwright.config.ts`), which defaults
 to Chromium; otherwise the npm script's own name decides, so `npm run test:webkit`
-means WebKit wherever it is run. Firefox is the second engine because its WebRTC
-works.
+means WebKit wherever it is run and `npm run test:firefox` means Firefox. The
+gate's engine is Chromium, because it is the one that runs everywhere.
 
-A third job runs the WebKit leg — `npm run test:webkit`, never a leg of the
-gate and never on a push or pull request. It excludes the pairing spec — the
-Windows build has no `RTCPeerConnection` and the Linux build's has never been
-paired for real — so it collects fewer tests than the README states: as a matrix
-engine it would fail the figure check for a difference that is not a regression,
-and a local `write` run would have recorded the smaller count as the published
-one. So
-`scripts/gate-figures.mjs` refuses `E2E_BROWSERS=webkit` outright, naming the
-command meant for it; `ci-parity.test.ts` pins that the leg stays a separate job
-that installs its own browser first, and never appears in the `gate` list; and
-`gate-figures.test.ts` covers the refusal itself. What the leg buys is the one
-thing no other engine can give — the degradation path against a real absence of
-the API, with nothing stubbed (see docs/INTEROP.md).
+Two more jobs run the e2e suite on its own, each for an engine the gate cannot
+carry, and each for the same reason: a smaller collection cannot check the
+README's figures.
 
-The leg runs on the schedule, and on demand: the workflow takes a
-`workflow_dispatch` trigger and the job's own condition accepts that event too.
+- **The Firefox leg** — `npm run test:firefox`, never a leg of the gate and
+  never on a push or pull request. On the hosted Linux runner Firefox cannot
+  offer a local ICE candidate at all, so its project excludes the pairing spec
+  there (on Windows the spec still runs, and passes) and it collects fewer
+  tests than the README states. The cause is the engine rather than the app —
+  the same gather succeeds in a plain process on the same machine — and
+  docs/INTEROP.md has the measurement with everything that was ruled out.
+- **The WebKit leg** — `npm run test:webkit`, never a leg of the gate either. It
+  excludes the pairing spec — the Windows build has no `RTCPeerConnection` and
+  the Linux build's has never been paired for real — and the offline spec,
+  which it cannot navigate. What this leg buys is the one thing no other engine
+  can give: the degradation path against a real absence of the API, with nothing
+  stubbed.
+
+For both, `scripts/gate-figures.mjs` refuses `E2E_BROWSERS=webkit` outright
+(rather than accommodating a smaller collection), naming the command meant for
+it; `ci-parity.test.ts` pins that each leg stays a separate job that installs
+its own browser first, and never appears in the `gate` list; and
+`gate-figures.test.ts` covers the refusal itself.
+
+Both legs run on the schedule, and on demand: the workflow takes a
+`workflow_dispatch` trigger and each job's own condition accepts that event too.
 A job reachable only at 03:17 UTC is a job nobody can check — a bad browser
 version or a renamed step would go unnoticed for a day at a time, and a green
 nightly would say nothing about whether the leg had ever executed. Both halves
