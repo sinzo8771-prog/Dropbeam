@@ -1,0 +1,30 @@
+# Dropbeam
+
+> Dropbeam sends files straight between your own devices, over a direct
+> connection in the browser. Nothing is uploaded: there is no account, no
+> server and no third-party request. The bytes travel over a WebRTC data
+> channel on your local network and are checked with SHA-256 on arrival.
+
+Dropbeam is a static web app: the whole thing is one page, it installs as a
+PWA, and it works offline. Two devices pair with a QR code, a link or a
+pasted code, compare three verification words, and then move files and notes
+to each other.
+
+## Documentation
+
+- [Product requirements](https://github.com/sinzo8771-prog/Dropbeam/blob/main/docs/PRD.md): what the app promises, milestone by milestone.
+- [Architecture](https://github.com/sinzo8771-prog/Dropbeam/blob/main/docs/ARCHITECTURE.md): how the pieces fit, and the rules the code follows.
+- [Privacy and the threat model](https://github.com/sinzo8771-prog/Dropbeam/blob/main/docs/PRIVACY.md): what is stored, what leaves the device, and the tests that hold it there.
+- [Terms of use](https://github.com/sinzo8771-prog/Dropbeam/blob/main/docs/TERMS.md).
+- [Self-hosting](https://github.com/sinzo8771-prog/Dropbeam/blob/main/docs/SELF-HOSTING.md): deploying it, and the STUN and TURN configuration.
+- [Testing](https://github.com/sinzo8771-prog/Dropbeam/blob/main/docs/TESTING.md): what each test layer covers.
+- [Browser interop](https://github.com/sinzo8771-prog/Dropbeam/blob/main/docs/INTEROP.md): which engine can do what, and what is still field QA.
+
+## Notes
+
+- There is no server-side API. Every route lives in the page, and file bytes
+  pass through nothing but the two browsers talking to each other.
+- The optional "Across networks" setting turns on a public STUN server, which
+  sees your public address. It is off by default.
+- The project is MIT licensed; `THIRD-PARTY-NOTICES.md` lists the libraries
+  the bundle ships.

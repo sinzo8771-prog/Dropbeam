@@ -168,6 +168,30 @@ test.describe("pairing and transfer (INTEROP: one engine, two contexts, paste ro
       await expect(guest.getByTestId("saved-row")).toBeVisible({ timeout: 60_000 });
       await expect(guest.getByTestId("saved-row")).toContainText("e2e-note.txt");
 
+      /*
+       * The transfer row reads as a row: the file's icon at the left edge of
+       * the list and its size at the right one. A generic `.row` rule that
+       * centred its children turned the column of rows into a column of
+       * centred lines, and only the rendered geometry shows that.
+       */
+      const layout = await host.evaluate(() => {
+        const row = document.querySelector('[data-testid="progress-row"]');
+        const list = row?.closest("ul.rows");
+        const icon = row?.querySelector(".file-icon");
+        const size = row?.querySelector(".row-size");
+        if (!row || !list || !icon || !size) return null;
+        const box = (el: Element) => el.getBoundingClientRect();
+        return {
+          iconLeft: box(icon).left,
+          sizeRight: box(size).right,
+          listLeft: box(list).left,
+          listRight: box(list).right,
+        };
+      });
+      expect(layout).not.toBeNull();
+      expect(layout!.iconLeft - layout!.listLeft).toBeLessThan(4);
+      expect(layout!.listRight - layout!.sizeRight).toBeLessThan(4);
+
       // FR-12: a note travels the other way.
       const note = "hello from the other browser";
       await guest.locator("#note-body").fill(note);

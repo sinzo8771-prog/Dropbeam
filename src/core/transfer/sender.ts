@@ -29,6 +29,16 @@ export type OutboundFile = {
 export type SendOffer = { id: string; files: OutboundFile[]; totalSize: number };
 
 export type SenderEvents = {
+  /**
+   * The fids this side just allocated for an outbound batch, with the name and
+   * size that go with them. Emitted before the first phase event, so a
+   * listener can label the rows it is about to be told about.
+   *
+   * The fids are allocated here and nowhere else: they count up across
+   * batches, so they cannot be derived from the batch's own index. Announcing
+   * them is what keeps a row's name and size real instead of a placeholder.
+   */
+  onAllocated?(files: { fid: number; name: string; size: number; type: string }[]): void;
   onResponse?(id: string, accepted: boolean): void;
   onPhase?(fid: number, phase: FilePhase): void;
   onProgress?(fid: number, sent: number, total: number): void;
@@ -229,6 +239,16 @@ export class Sender {
         type: f.type || f.blob.type || "application/octet-stream",
         ...(f.path ? { path: f.path } : {}),
       }));
+      // The fids exist only here, so this is the one place that can say which
+      // file is which — before any phase event goes out and a row is created.
+      this.events.onAllocated?.(
+        outbound.map((f) => ({
+          fid: f.fid,
+          name: f.name,
+          size: f.blob.size,
+          type: f.type,
+        })),
+      );
       for (const f of outbound) this.setPhase(f.fid, "QUEUED");
       for (const f of outbound) this.inflight.set(f.fid, f);
       const totalSize = files.reduce((n, f) => n + f.blob.size, 0);

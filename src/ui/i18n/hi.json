@@ -129,7 +129,7 @@
   "transfer.verificationHelp": "जाँचें कि दोनों उपकरण एक ही शब्द दिखा रहे हैं। अगर अलग हैं, तो कनेक्शन तोड़ें।",
   "transfer.verified": "सत्यापित",
   "transfer.verificationDigits": "बोलकर सुनाएँ",
-  "transfer.speed": "{value}/s",
+  "transfer.speed": "{value}",
   "transfer.total": "कुल",
   "transfer.lockWarning": "यदि यह उपकरण अपनी स्क्रीन लॉक कर ले, तो स्थानांतरण रुक सकता है। स्क्रीन जागते रखें।",
   "transfer.eta": "{value} बाकी",

@@ -74,23 +74,24 @@ export class TransferSession {
   constructor(private readonly opts: TransferSessionOptions) {
     const events = opts.events ?? {};
     this.store = opts.store ?? resumeStore;
-    const track = (fid: number, name: string, size: number, type = "") => {
-      if (!this.files.has(fid)) {
-        this.files.set(fid, { fid, name, size, type, phase: "QUEUED", done: 0 });
-      }
-      return this.files.get(fid)!;
-    };
 
     this.sender = new Sender(
       opts.channel,
       {
+        // The sender owns the fids and announces them as it allocates them,
+        // so a row is created with the file's real name and size rather than
+        // a placeholder. Deriving the ids here instead would be a second
+        // allocator that drifts from the first one after the second batch.
+        onAllocated: (files) => {
+          for (const f of files) this.track(f.fid, f.name, f.size, f.type);
+        },
         onPhase: (fid, phase) => {
-          const file = this.files.get(fid) ?? track(fid, `file-${fid}`, 0);
+          const file = this.files.get(fid) ?? this.track(fid, `file-${fid}`, 0);
           file.phase = phase;
           events.onPhase?.({ ...file });
         },
         onProgress: (fid, sent, total) => {
-          const file = this.files.get(fid) ?? track(fid, `file-${fid}`, total);
+          const file = this.files.get(fid) ?? this.track(fid, `file-${fid}`, total);
           file.done = sent;
           file.size = total;
           events.onProgress?.({ ...file });
@@ -107,17 +108,17 @@ export class TransferSession {
       {
         onHello: (hello) => events.onHello?.(hello.name ?? ""),
         onOffer: (offer) => {
-          for (const f of offer.files) track(f.fid, f.name, f.size, f.type);
+          for (const f of offer.files) this.track(f.fid, f.name, f.size, f.type);
           events.onOffer?.(offer);
         },
         onText: (text) => events.onText?.(text),
         onPhase: (fid, phase) => {
-          const file = this.files.get(fid) ?? track(fid, `file-${fid}`, 0);
+          const file = this.files.get(fid) ?? this.track(fid, `file-${fid}`, 0);
           file.phase = phase;
           events.onPhase?.({ ...file });
         },
         onProgress: (fid, received, total) => {
-          const file = this.files.get(fid) ?? track(fid, `file-${fid}`, total);
+          const file = this.files.get(fid) ?? this.track(fid, `file-${fid}`, total);
           file.done = received;
           file.size = total;
           events.onProgress?.({ ...file });
@@ -211,14 +212,6 @@ export class TransferSession {
       name: sanitizeFilename(f.name),
       type: f.type || f.blob.type || "application/octet-stream",
     }));
-    // Sender allocates fids as `parity + 1 + index * 2` (see Sender.allocFid),
-    // so the names are known up front and progress rows can show them. The
-    // blobs themselves stay in the Sender's in-flight set: a dropped channel
-    // parks them there, and a re-paired session re-offers them (resume).
-    const parity = this.opts.fidParity ?? 0;
-    safe.forEach((f, index) =>
-      this.track(parity + 1 + index * 2, f.name, f.blob.size, f.type),
-    );
     try {
       await this.sender.sendFiles(safe);
     } catch (err) {
@@ -258,9 +251,20 @@ export class TransferSession {
     return [...this.files.values()].map((f) => ({ ...f }));
   }
 
-  private track(fid: number, name: string, size: number, type = ""): void {
-    if (!this.files.has(fid)) {
-      this.files.set(fid, { fid, name, size, type, phase: "QUEUED", done: 0 });
-    }
+  /**
+   * Record a file this side has seen, and return it.
+   *
+   * The first event about a file can arrive before anything says what the
+   * file is — the phase that a peer declines a file, for instance — so the
+   * row is created as a placeholder and filled in when the name arrives. A
+   * file that is already recorded keeps the record it has: the first one
+   * knows the real name, and a later placeholder must not overwrite it.
+   */
+  private track(fid: number, name: string, size: number, type = ""): FileProgress {
+    const known = this.files.get(fid);
+    if (known) return known;
+    const file: FileProgress = { fid, name, size, type, phase: "QUEUED", done: 0 };
+    this.files.set(fid, file);
+    return file;
   }
 }

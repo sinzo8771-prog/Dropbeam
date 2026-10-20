@@ -56,7 +56,10 @@ export type UseTransferOptions = {
   channel: ChannelLike | null;
   deviceName?: string;
   autoAccept?: boolean;
-  /** Odd fids for the offerer, even for the answerer, so they never collide. */
+  /**
+   * The parity of this side's fids: 1 for the host (even fids), 0 for the
+   * guest (odd ones), so the two directions never collide.
+   */
   fidParity?: 0 | 1;
   /**
    * Live `RTCPeerConnection.connectionState` for the session. While it reads

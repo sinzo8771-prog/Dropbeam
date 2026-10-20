@@ -1,5 +1,5 @@
 import type { ComponentChildren } from "preact";
-import { useEffect, useRef } from "preact/hooks";
+import { useEffect, useId, useRef } from "preact/hooks";
 
 /**
  * Modal prompt (PRD 5.1 / FR-13): the incoming-transfer decision and any
@@ -27,6 +27,15 @@ export function Prompt({
   onDecline,
 }: PromptProps) {
   const ref = useRef<HTMLDialogElement>(null);
+  /**
+   * The heading's id, unique to this prompt.
+   *
+   * The app mounts three of these at once, and a shared id would make every
+   * one of them answer `aria-labelledby` with the first heading in the
+   * document: the approval dialog would be announced as "Scan reply", because
+   * that is the title of the prompt rendered before it.
+   */
+  const titleId = `prompt-title-${useId()}`;
 
   useEffect(() => {
     const el = ref.current;
@@ -44,8 +53,8 @@ export function Prompt({
   }, [open]);
 
   return (
-    <dialog class="prompt" ref={ref} aria-labelledby="prompt-title" onCancel={onDecline}>
-      <h2 id="prompt-title" class="prompt-title">
+    <dialog class="prompt" ref={ref} aria-labelledby={titleId} onCancel={onDecline}>
+      <h2 id={titleId} class="prompt-title">
         {title}
       </h2>
       {body ? <div class="prompt-body">{body}</div> : null}

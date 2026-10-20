@@ -185,6 +185,39 @@ describe("TransferSession over a live channel (PRD 8.4, 8.5)", () => {
     receiver.dispose();
   });
 
+  it("names every row after the file it is, even in the second batch", async () => {
+    /*
+     * The fids count up across batches: the first offer takes 1, the next
+     * takes 3, so they cannot be derived from the batch's own index. A
+     * session that derived them anyway tracked the second file under the
+     * first one's id, and the row the user watched said "file-3 / 0 B"
+     * instead of the name and size of the file they had just picked.
+     */
+    const { a, b } = pair();
+    const sender = new TransferSession({ channel: a, fidParity: 0 });
+    const receiver = new TransferSession({
+      channel: b,
+      fidParity: 1,
+      autoAccept: true,
+      pickDestination: async () => new CollectingSink(),
+    });
+    await new Promise((r) => setTimeout(r, 5));
+
+    await sender.sendFiles([{ blob: blobOf(1000), name: "first.txt" }]);
+    await sender.sendFiles([{ blob: blobOf(2000), name: "second.txt" }]);
+
+    const rows = sender.snapshot();
+    expect(rows.map((r) => r.name).sort()).toEqual(["first.txt", "second.txt"]);
+    expect(rows.map((r) => r.size).sort((a, b) => a - b)).toEqual([1000, 2000]);
+    // No placeholder row: every row is a file the user actually picked.
+    expect(rows.some((r) => r.name.startsWith("file-"))).toBe(false);
+    // The two files are tracked under different ids.
+    expect(new Set(rows.map((r) => r.fid)).size).toBe(2);
+
+    sender.dispose();
+    receiver.dispose();
+  });
+
   it("sends a text snippet both ways (FR-12)", async () => {
     const { a, b } = pair();
     const received: string[] = [];

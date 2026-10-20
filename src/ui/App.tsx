@@ -318,7 +318,8 @@ export function App({ settings, baseUrl }: AppProps = {}) {
     channel,
     deviceName: pref.deviceName,
     autoAccept: pref.autoAccept,
-    // Odd fids for the offerer, even for the answerer (PRD 8.4).
+    // Even fids for the host (the WebRTC offerer), odd for the guest, so the
+    // two directions never collide.
     fidParity: side === "host" ? 1 : 0,
   });
 

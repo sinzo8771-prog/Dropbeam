@@ -1,4 +1,3 @@
-import type { HtmlTagDescriptor } from "vite";
 import { defineConfig } from "vitest/config";
 
 const PROD_CSP = [
@@ -27,20 +26,40 @@ const DEV_CSP = PROD_CSP.replace("style-src 'self'", "style-src 'self' 'unsafe-i
   "connect-src 'self' ws: wss:",
 );
 
+/**
+ * The one `<meta>` that carries the policy.
+ *
+ * A document may carry more than one policy, but a resource then has to
+ * satisfy all of them: the effective restriction is the intersection, so the
+ * stricter policy wins. Adding a looser dev policy *next to* the strict
+ * shipped one therefore leaves the strict one in charge — and the dev page
+ * loses its styles, because Vite injects them as `<style>` elements that
+ * `style-src 'self'` blocks. The dev policy has to replace the shipped one,
+ * not sit beside it.
+ */
+const CSP_META = /<meta[^>]*http-equiv="Content-Security-Policy"[^>]*>/i;
+
+/**
+ * The dev server's page, with the shipped policy swapped for the dev one.
+ *
+ * Exported so the test can hold the transform to what it promises: exactly
+ * one policy in the document, and it is the dev one.
+ */
+export function applyDevCsp(html: string): string {
+  return html.replace(
+    CSP_META,
+    `<meta http-equiv="Content-Security-Policy" content="${DEV_CSP}" />`,
+  );
+}
+
 export default defineConfig({
   base: "./",
   plugins: [
     {
       name: "dropbeam-csp-dev",
       apply: "serve",
-      transformIndexHtml(): HtmlTagDescriptor[] {
-        return [
-          {
-            tag: "meta",
-            attrs: { "http-equiv": "Content-Security-Policy", content: DEV_CSP },
-            injectTo: "head-prepend",
-          },
-        ];
+      transformIndexHtml(html: string): string {
+        return applyDevCsp(html);
       },
     },
   ],

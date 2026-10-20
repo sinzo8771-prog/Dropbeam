@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { applyDevCsp } from "../../vite.config";
 
 /**
  * The shipped Content-Security-Policy (PRD 9.1, 9.2, DoD 9).
@@ -93,5 +94,28 @@ describe("the shipped policy (PRD 9.1, 9.2)", () => {
     // And the shipped page carries none of it.
     expect(shippedPolicy()).not.toContain("unsafe-inline");
     expect(shippedPolicy()).not.toContain("ws:");
+  });
+
+  it("leaves the dev page with exactly one policy, and it is the dev one", () => {
+    /*
+     * A document may carry several policies, but a resource then has to pass
+     * all of them: the effective restriction is the intersection, so the
+     * stricter one wins. The dev policy therefore has to *replace* the
+     * shipped one, not sit beside it — with both present the strict policy
+     * stayed in charge, Vite's injected `<style>` elements were blocked, and
+     * the dev page rendered with no styles at all.
+     */
+    const dev = applyDevCsp(indexHtml);
+    const policies = dev.match(/http-equiv="Content-Security-Policy"/g) ?? [];
+    expect(policies).toHaveLength(1);
+    const content = /http-equiv="Content-Security-Policy" content="([^"]+)"/.exec(dev)?.[1] ?? "";
+    // The relaxed directives are in force, so Vite's styles and its socket work.
+    expect(content).toContain("style-src 'self' 'unsafe-inline'");
+    expect(content).toContain("connect-src 'self' ws: wss:");
+    // And nothing else was relaxed on the way.
+    expect(content).toContain("object-src 'none'");
+    expect(content).toContain("base-uri 'none'");
+    // The shipped page keeps the strict policy, untouched.
+    expect(shippedPolicy()).not.toContain("unsafe-inline");
   });
 });

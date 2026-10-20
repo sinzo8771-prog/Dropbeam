@@ -11,6 +11,16 @@ library's docs gets an entry here (PRD section 0.3).
 - **Choice:** `index.html` ships the PRD CSP verbatim. During `vite dev` a `transformIndexHtml` plugin prepends a dev-only variant adding `'unsafe-inline'` to `style-src` and `ws: wss:` to `connect-src`. Production build output never contains the relaxed CSP.
 - **Reason:** Keeps the shipped policy exactly as specified while keeping local development usable.
 
+> **Superseded in part (2026-10-20):** prepending the dev variant did not work,
+> and the reason is in the CSP spec rather than in Vite: a document may carry
+> several policies, but a resource then has to satisfy *all* of them, so the
+> effective restriction is their intersection. The strict shipped policy stayed
+> in charge, Vite's injected `<style>` elements were blocked, and the dev page
+> rendered with no styles at all — the very thing the relaxation existed to
+> prevent. The plugin now *replaces* the policy instead of adding a second one,
+> so the dev page carries exactly one policy and it is the relaxed one. The
+> shipped page is untouched. The 2026-10-20 entry has the measurement.
+
 ## 2026-10-03 · Impeccable install and command mapping
 
 - **Problem:** PRD 10.7 requires `npx impeccable install`, `/impeccable init`, and a
@@ -429,12 +439,18 @@ library's docs gets an entry here (PRD section 0.3).
 
 - **`/impeccable polish` pass:** triaged the new surfaces against the
   playbook (flow → states → hierarchy → consistency → cleanup). No P0–P2
-  changes needed; one known P3 stands: Vite's dev-only inline HMR styles
+  changes needed; one known P3 stood: Vite's dev-only inline HMR styles
   trip the strict `style-src 'self'` CSP in the console (dev-only, documented
   above, production CSP unaffected). One pre-existing gap flagged, not
   introduced here: FR-41's settings sheet has no UI surface yet (the store,
   keys and i18n exist), so the troubleshooting page describes Across
   networks without a toggle to reach it.
+  > **Closed (2026-10-20):** the P3 was the dev page's console errors, and
+  > they were the symptom of the policy being in force twice rather than once.
+  > The dev server now replaces the policy instead of prepending a second
+  > one, so the dev page loads its styles and logs no CSP error. The gate
+  > says zero console errors on the shipped page; this is the same claim for
+  > the page a developer actually looks at.
 - **Lighthouse (mobile profile, v11, against `vite preview`):** Performance
   99, Accessibility 100, PWA 100 — M7's "≥ 90 each" gate met. The first run
   scored PWA 75 because the manifest declared `theme_color` as a
@@ -2021,3 +2037,116 @@ encountered an internal error` on `page.reload()` and `page.goto()` while the
   cannot read it. The release audit and the pairing spec now ask for the
   note's Send button *exactly*, because a role name matches a substring and
   "Send back" contains "Send". `npm run test` is 418 green.
+
+---
+
+## 2026-10-20 · The dev page's policy was in force twice, and the stricter one won
+
+- **Problem:** `npm run dev` — the command the README's quick start gives —
+  rendered the app with no CSS at all: the body fell back to Times New Roman
+  and the page showed up as raw HTML. The console said why, three times per
+  load: "Applying inline style violates the following Content Security Policy
+  directive 'style-src 'self''".
+
+- **Choice:** the dev plugin now *replaces* the policy in the page it serves
+  rather than adding a second one beside it. `index.html` still ships the
+  PRD policy verbatim and the production build output is unchanged; the
+  served HTML in dev carries exactly one policy, the relaxed one.
+
+- **Reason:** a document may carry several policies, but a resource then has
+  to satisfy all of them — the effective restriction is their intersection,
+  so the stricter policy wins. Prepending a looser dev policy to the strict
+  shipped one therefore left the strict one in charge, and Vite's injected
+  `<style>` elements are exactly what `style-src 'self'` blocks. The
+  relaxation had been in the codebase since M4 and had never been exercised,
+  because every check in the gate runs against the production build, where
+  the policy is one policy and the stylesheet is a real file.
+
+- **Verified:** `tests/unit/csp.test.ts` now runs the dev transform over the
+  real `index.html` and holds it to one policy, the relaxed one, with nothing
+  else relaxed. In a browser, the dev page loads three stylesheets, uses the
+  app's own faces, and logs no console error.
+
+## 2026-10-20 · Four defects a browser found and the tests did not
+
+- **Problem:** driving the app in a real browser, end to end, turned up four
+  things the suite was green about.
+
+  - A file offered in the *second* batch lost its name and size on the
+    sender's side: the row said `file-3` and `0 B`. The session pre-tracked
+    outbound files at `parity + 1 + index * 2` — the batch's own index —
+    while the sender allocates fids from a counter that keeps counting across
+    batches. The two agreed for the first batch and drifted after it, and
+    the row was created from the fallback path that has no name to give.
+  - The speed read `2.6 MB/s/s`: `formatRate()` already carries the unit and
+    the sentence carried it a second time.
+  - All three modal dialogs answered `aria-labelledby` with the first heading
+    in the document, so the host's approval prompt was announced as "Scan
+    reply" — the title of the prompt rendered before it. They shared one
+    `id="prompt-title"`.
+  - The transfer rows were centred in the list rather than running edge to
+    edge: a generic `.row` rule set `align-items: center` and the later rule
+    that turned the row into a column did not reset it, so `.row-head` shrank
+    to its content and its `space-between` had nothing to spread.
+
+- **Choice:** the sender is now the only place that allocates fids, and it
+  announces them as it allocates them (`onAllocated`), so a row is created
+  with the file's real name and size. The duplicated allocator is gone. The
+  speed sentence no longer carries a unit of its own. Each prompt's heading
+  has its own id, from `useId()`. The transfer row stretches its children, so
+  the name and the size sit at the two edges.
+
+- **Reason:** each of these was a place where two pieces of the code believed
+  the same fact — the fid, the unit, the heading, the alignment — and only
+  one of them was right. The fix in every case is to have one owner.
+
+- **Verified:** `tests/integration/transfer-session.test.ts` sends two batches
+  and asserts every row carries a name the user picked; `tests/unit/ui.test.tsx`
+  asserts the speed carries one unit and that two prompts have different
+  ids, each naming its own heading; `tests/e2e/pairing-transfer.spec.ts`
+  measures the rendered geometry of a real row. In a browser, the second
+  batch's row reads `second.bin` and `1.0 MB`, the totals line reads
+  `3.0 MB/s`, the approval dialog is announced as "Allow connection from This
+  device?", and the file's size sits flush with the right edge of the list.
+
+- **Cost and limits:** the `onAllocated` callback is the sender telling the
+  session what it is about to hear about, so the session no longer derives
+  fids — the two cannot drift, because there is only one. The speed's unit is
+  still Latin-script in both languages, as the sizes have always been; the
+  unit belongs to the value, not to the sentence, which is what the ETA has
+  always done.
+
+---
+
+## 2026-10-20 · The site publishes what an agent asks for, and nothing it cannot back
+
+- **Problem:** the static host answers *every* path with the app's
+  `index.html`, so a crawler asking for `/llms.txt` or for
+  `/.well-known/ai-catalog.json` was handed a page of markup. Lighthouse read
+  that as a broken agent-discovery setup, and the agentic-browsing category
+  scored 50 - the one Lighthouse number this project did not have.
+
+- **Choice:** publish both files, and let the catalogue be empty.
+  `public/llms.txt` describes the app in the shape the format asks for - one
+  H1, a short summary, and links to the documentation that exists.
+  `public/.well-known/ai-catalog.json` is a valid manifest that names the
+  publisher and lists no entries.
+
+- **Reason:** the empty catalogue is the honest one. The app has no
+  server-side API for an agent to call, and a manifest full of invented URLs
+  would be a false claim rather than a discovery aid. Publishing the files
+  fixes what was actually wrong - the two answers now mean something - without
+  claiming anything untrue about what the app offers.
+
+- **Cost and limits:** both files are precached by the worker, because the
+  precache is the whole emitted tree; a crawl of the site is still a crawl of
+  an app that has no pages to read. The category measures how legible a site
+  is to an agent, and this one is legible in the only way it can be: a short
+  description and a link to the documentation.
+
+- **Verified:** `tests/unit/agent-discovery.test.ts` holds the shape of both
+  files, checks that every link in `llms.txt` points at a document that is
+  actually in the repository, and asserts the catalogue's emptiness on
+  purpose, so a future entry has to satisfy the spec to be added. The
+  release audit now reports 100 for agentic-browsing, alongside 99 / 100 /
+  100 / 100 for the other four categories.

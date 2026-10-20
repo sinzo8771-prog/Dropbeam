@@ -213,6 +213,9 @@ describe("ProgressRow (PRD 10.1 #6)", () => {
     expect(screen.getByTestId("row-rate")).toBeTruthy();
     expect(screen.getByTestId("row-eta")).toBeTruthy();
     expect(screen.getByTestId("row-rate").textContent).toMatch(/\/s$/);
+    // The unit is written once. The formatter carries it ("154 KB/s"), so the
+    // sentence must not add a second one ("154 KB/s/s").
+    expect(screen.getByTestId("row-rate").textContent).not.toContain("/s/s");
     expect(screen.getByTestId("row-eta").textContent).toMatch(/left$/);
   });
 
@@ -257,7 +260,12 @@ describe("Prompt (PRD FR-13)", () => {
     );
     const dialog = container.querySelector("dialog");
     expect(dialog).not.toBeNull();
-    expect(dialog?.getAttribute("aria-labelledby")).toBe("prompt-title");
+    // The dialog is labelled by its own heading. The id is unique to this
+    // prompt: the app mounts three of them at once, and a shared id made
+    // every one of them answer with the first heading in the document.
+    const labelledBy = dialog?.getAttribute("aria-labelledby") ?? "";
+    expect(labelledBy).not.toBe("");
+    expect(dialog?.querySelector(`#${labelledBy}`)?.textContent).toBe("Send 2 files?");
     expect(screen.getByText("Send 2 files?")).toBeTruthy();
     expect(screen.getByText("Accept")).toBeTruthy();
     // `open` must actually be set, or the prompt is invisible and unusable.
@@ -288,6 +296,42 @@ describe("Prompt (PRD FR-13)", () => {
       />,
     );
     expect((container.querySelector("dialog") as HTMLDialogElement).open).toBe(false);
+  });
+
+  it("gives every prompt its own heading, and names it", () => {
+    // Three prompts are mounted at once in the app: the scan reply, the
+    // incoming files and the host's approval. They must not share an id, or
+    // `aria-labelledby` resolves to whichever heading the browser finds
+    // first and the wrong title is announced.
+    const { container } = render(
+      <>
+        <Prompt
+          open
+          title="Scan reply"
+          acceptLabel="Accept"
+          declineLabel="Decline"
+          onAccept={() => {}}
+          onDecline={() => {}}
+        />
+        <Prompt
+          open
+          title="Allow connection from This device?"
+          acceptLabel="Allow"
+          declineLabel="Decline"
+          onAccept={() => {}}
+          onDecline={() => {}}
+        />
+      </>,
+    );
+    const dialogs = [...container.querySelectorAll("dialog")];
+    expect(dialogs).toHaveLength(2);
+    const ids = dialogs.map((d) => d.getAttribute("aria-labelledby"));
+    expect(new Set(ids).size).toBe(2);
+    // Each dialog's label is its own heading, not its neighbour's.
+    expect(dialogs[0]?.querySelector(`#${ids[0]}`)?.textContent).toBe("Scan reply");
+    expect(dialogs[1]?.querySelector(`#${ids[1]}`)?.textContent).toBe(
+      "Allow connection from This device?",
+    );
   });
 });
 

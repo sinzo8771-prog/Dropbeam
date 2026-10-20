@@ -635,6 +635,16 @@ dialog.sheet {
 .row {
   display: flex;
   flex-direction: column;
+  /*
+   * The generic `.row` above centres its children and wraps them, which is
+   * right for a horizontal strip and wrong here: this rule turns the row
+   * into a column, and a centred column puts every row's name and size in
+   * the middle of the list instead of at its edges. Stretching them is what
+   * gives `.row-head` and `.row-foot` the full width their
+   * `justify-content: space-between` needs to work.
+   */
+  align-items: stretch;
+  flex-wrap: nowrap;
   gap: var(--s-2);
   padding: var(--s-3) 0;
   border-bottom: 1px solid var(--hairline);

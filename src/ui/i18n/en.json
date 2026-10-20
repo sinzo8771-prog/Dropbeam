@@ -153,7 +153,7 @@
   "transfer.verificationHelp": "Check that both devices show the same words. If they differ, disconnect.",
   "transfer.verified": "Verified",
   "transfer.verificationDigits": "Read aloud",
-  "transfer.speed": "{value}/s",
+  "transfer.speed": "{value}",
   "transfer.eta": "{value} left",
   "transfer.etaUnknown": "estimating…",
   "transfer.total": "Total",
