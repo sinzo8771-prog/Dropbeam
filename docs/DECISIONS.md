@@ -2150,3 +2150,42 @@ encountered an internal error` on `page.reload()` and `page.goto()` while the
   purpose, so a future entry has to satisfy the spec to be added. The
   release audit now reports 100 for agentic-browsing, alongside 99 / 100 /
   100 / 100 for the other four categories.
+
+---
+
+## 2026-10-20 · One PRD, and the brief it came from kept where it can be found
+
+- **Problem:** the repository carried two files with the same title, the same
+  version line and almost the same 800 lines: `PRD-Dropbeam-FINAL.md` at the
+  root and `docs/PRD.md`. Both were added in the M0 commit, and from there
+  only one of them moved: `docs/PRD.md` took the resumable transfers, the
+  per-chunk repair, the recoverable-drop grace and the memory-sink correction,
+  while the root copy was never touched again. Nothing said which was which,
+  so a reader opening the one at the root had no way to know it was a frozen
+  snapshot - and the project's own authority for the CSP policy, the test that
+  reads it, and the README's link all point at the other one.
+
+- **Choice:** the root copy moves to `docs/PRD-original-brief.md` and says, in
+  its first line, what it is: the brief as it was handed to the build, frozen
+  on 2026-10-03, with the living PRD named and the rule stated - where they
+  differ, `docs/PRD.md` counts. The living PRD now says the same about
+  itself, and the README's documentation list carries both, so the front
+  door names the pair.
+
+- **Reason:** the project keeps records rather than deleting them, and the
+  brief is a real record - it is the input the whole build answered to, and
+  section 20 of the living PRD quotes it. What it should not be is a second
+  candidate for the authority, sitting where the reader looks first. A
+  document that cannot be maintained should say so at the top, in the same
+  words, for both copies.
+
+- **Also:** the formatters stopped being re-exported from the component that
+  happened to use them. `src/ui/format.ts` has been their home since they
+  moved there, but `ProgressRow.tsx` still re-exported all three and the
+  unit test still imported one of them from the component. The re-export is
+  gone and the test imports from where the formatters live.
+
+- **Verified:** the tree is the same otherwise - no broken relative link in
+  any tracked markdown, no source file nothing else mentions, and nothing
+  untracked outside the ignored build and tool directories. The gate is
+  green, and the CSP test still reads the policy out of `docs/PRD.md`.

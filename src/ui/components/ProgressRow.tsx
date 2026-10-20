@@ -40,8 +40,6 @@ const PHASE_LABEL_KEY: Record<FilePhase, StringKey> = {
   CANCELED: "transfer.phase.canceled",
 };
 
-export { formatBytes, formatDuration, formatRate };
-
 export function ProgressRow({
   t,
   name,

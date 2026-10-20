@@ -4,7 +4,8 @@ import { render, screen, fireEvent, cleanup, waitFor, within } from "@testing-li
 import { afterEach } from "vitest";
 import { QrTile } from "../../src/ui/components/QrTile";
 import { CodeBox, groupCode } from "../../src/ui/components/CodeBox";
-import { ProgressRow, formatBytes } from "../../src/ui/components/ProgressRow";
+import { ProgressRow } from "../../src/ui/components/ProgressRow";
+import { formatBytes } from "../../src/ui/format";
 import { translatorFor } from "../../src/core/platform/i18n";
 import { Prompt } from "../../src/ui/components/Prompt";
 import { Beam } from "../../src/ui/components/Beam";

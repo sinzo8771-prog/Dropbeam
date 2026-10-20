@@ -99,6 +99,7 @@ the hotspot trick and the browser support table.
 ## Documentation
 
 - [docs/PRD.md](docs/PRD.md) — product requirements and milestones
+- [docs/PRD-original-brief.md](docs/PRD-original-brief.md) — the brief as it was handed to the build, frozen
 - [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — how the pieces fit
 - [docs/PRIVACY.md](docs/PRIVACY.md) — threat model with linked tests
 - [docs/TERMS.md](docs/TERMS.md) — terms of use

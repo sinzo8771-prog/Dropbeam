@@ -1,5 +1,12 @@
 # PRD (FINAL): Dropbeam — direct device-to-device file transfer in the browser
 
+> **The original brief, kept as it was.** This is the document the build was
+> started from, frozen on 2026-10-03 and not maintained since. The living PRD
+> is [`docs/PRD.md`](PRD.md): it is the version the project is built against,
+> the one the README points at, and the one the tests read. Where the two
+> differ, the living PRD is the one that counts. Section 20 still names this
+> file by its original name, because that is the name the brief had.
+
 Version 1.1 FINAL · Owner: Qweq · Audience: AI coding agent (build the whole product from this document)
 
 This version adds: the design system, component decisions, the Impeccable design workflow, and a ready-to-use `PRODUCT.md` (Appendix C) and design tokens (Appendix D).
